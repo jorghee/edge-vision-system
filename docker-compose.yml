@@ -53,14 +53,15 @@ services:
       MQTT_PORT: "1883"
       MQTT_TOPIC: camera/events
       CAMERA_ID: cam-01
+      CAMERA_INDEX: "2"
       INTERVAL_SEC: "3"
     depends_on:
       - mqtt
     networks:
       - edge-net
     # To access to host webcam
-    # devices:
-    #   - /dev/video0:/dev/video0
+    devices:
+      - /dev/video2:/dev/video2
 
   # Action service
   action_service:
