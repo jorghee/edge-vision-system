@@ -55,6 +55,9 @@ services:
       CAMERA_ID: cam-01
       CAMERA_INDEX: "2"
       INTERVAL_SEC: "3"
+      USE_SIMULATION: "false"
+      MODEL_PATH: "/app/models/yolov8n.pt"
+      CONFIDENCE_THR: "0.45"
     depends_on:
       - mqtt
     networks:
