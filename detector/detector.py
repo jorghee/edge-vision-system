@@ -44,11 +44,31 @@ class EPPDetector:
     # Clases COCO relevantes
     COCO_PERSON_CLASS = 0
 
+    EPP_CLASSES = {
+        "helmet":     0,   # casco detectado
+        "head":       1,   # cabeza sin casco
+        "person":     2,   # persona (redundante con modelo base)
+    }
+
     def __init__(self, model_path: str, confidence: float = 0.45):
-        log.info(f"[YOLO] Cargando modelo desde {model_path}...")
-        self.model      = YOLO(model_path)
+        ppe_path = os.path.join(os.path.dirname(model_path), "ppe_detector.pt")
+
+        log.info(f"[YOLO] Cargando modelo base desde {model_path}...")
+        self.model_base = YOLO(model_path)
+
+        # Cargar modelo EPP si existe
+        if os.path.exists(ppe_path):
+            log.info(f"[YOLO] Cargando modelo EPP desde {ppe_path}...")
+            self.model_ppe     = YOLO(ppe_path)
+            self.use_ppe_model = True
+            log.info("[YOLO] Modelo EPP cargado — inferencia real de casco")
+        else:
+            log.warning("[YOLO] Modelo EPP no encontrado, usando análisis de color")
+            self.model_ppe     = None
+            self.use_ppe_model = False
+
         self.confidence = confidence
-        log.info("[YOLO] Modelo cargado correctamente")
+        log.info("[YOLO] Modelos listos")
 
     def detect_persons(self, frame: np.ndarray) -> list:
         """
@@ -56,7 +76,7 @@ class EPPDetector:
         Retorna lista de bounding boxes de personas detectadas.
         Cada bbox es (x1, y1, x2, y2, confidence).
         """
-        results = self.model(
+        results = self.model_base(
             frame,
             conf=self.confidence,
             classes=[self.COCO_PERSON_CLASS],  # Solo detectar personas
@@ -74,39 +94,77 @@ class EPPDetector:
 
     def analyze_ppe(self, frame: np.ndarray, bbox: tuple) -> dict:
         """
-        Analiza el EPP de una persona detectada.
-
-        00-30%: Cabeza, detectar casco (blanco/amarillo/naranja) y1
-        30-70%: Torso, detectar chaleco (fluorescente + reflectivo)
-        70-100%: Base, ignorado (piernas/calzado) y2
+        Analiza EPP de una persona.
+        Usa modelo EPP si está disponible, color HSV como fallback.
         """
         x1, y1, x2, y2, person_conf = bbox
-        height = y2 - y1
-        width  = x2 - x1
-
-        # Recortar región de la persona del frame
         person_crop = frame[y1:y2, x1:x2]
 
         if person_crop.size == 0:
             return self._empty_ppe_result()
 
-        # Definir zonas
-        head_y2   = int(height * 0.30)
-        torso_y1  = int(height * 0.30)
-        torso_y2  = int(height * 0.70)
+        if self.use_ppe_model:
+            return self._analyze_with_model(person_crop, person_conf, bbox)
+        else:
+            return self._analyze_with_color(person_crop, person_conf, bbox)
 
-        head_region  = person_crop[0:head_y2, :]
-        torso_region = person_crop[torso_y1:torso_y2, :]
+    def _analyze_with_model(self, crop: np.ndarray, person_conf: float, bbox: tuple) -> dict:
+        """
+        Inferencia real con modelo fine-tuned.
+        Corre localmente en CPU — sin internet, sin nube.
+        """
+        x1, y1, x2, y2, _ = bbox
+        results = self.model_ppe(crop, conf=self.confidence, verbose=False)
 
-        # Analizar cada zona
-        helmet_result = self._detect_helmet_color(head_region)
-        vest_result   = self._detect_vest_color(torso_region)
+        helmet_detected    = False
+        helmet_confidence  = 0.0
+        head_detected      = False   # cabeza sin casco
+
+        for result in results:
+            for box in result.boxes:
+                cls  = int(box.cls[0])
+                conf = float(box.conf[0])
+
+                if cls == self.EPP_CLASSES["helmet"]:
+                    helmet_detected   = True
+                    helmet_confidence = max(helmet_confidence, conf)
+
+                elif cls == self.EPP_CLASSES["head"]:
+                    head_detected = True   # confirma que hay cabeza visible
+
+        # Si detectó cabeza pero no casco → no_helmet confirmado
+        # Si no detectó ni cabeza ni casco → persona de espaldas, ignorar
+        if not head_detected and not helmet_detected:
+            # No se puede determinar — asumir compliant para no generar falsos
+            helmet_detected   = True
+            helmet_confidence = 0.5
 
         return {
             "person_confidence": round(person_conf, 2),
-            "helmet":  helmet_result,
-            "vest":    vest_result,
-            "bbox":    {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+            "helmet": {
+                "detected":   helmet_detected,
+                "confidence": round(helmet_confidence, 2),
+                "color":      None,
+                "method":     "yolo_model"
+            },
+            # Este modelo no detecta chaleco — usar color como complemento
+            "vest": self._detect_vest_color_from_crop(crop),
+            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+        }
+
+    def _analyze_with_color(self, crop: np.ndarray, person_conf: float, bbox: tuple) -> dict:
+        """Fallback: análisis de color HSV cuando no hay modelo EPP."""
+        x1, y1, x2, y2, _ = bbox
+        height = crop.shape[0]
+
+        head_region  = crop[0:int(height * 0.30), :]
+        torso_region = crop[int(height * 0.30):int(height * 0.70), :]
+
+        return {
+            "person_confidence": round(person_conf, 2),
+            "helmet": {**self._detect_helmet_color(head_region), "method": "color_hsv"},
+            "vest":   self._detect_vest_color_from_crop(torso_region),
+            "bbox":   {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
         }
 
     def _detect_helmet_color(self, region: np.ndarray) -> dict:
@@ -150,40 +208,33 @@ class EPPDetector:
             "color":      best_color if detected else None
         }
 
-    def _detect_vest_color(self, region: np.ndarray) -> dict:
-        """
-        Detecta chaleco de seguridad por color fluorescente.
-        Los chalecos en minería son típicamente naranja fluo o amarillo fluo.
-        """
+    def _detect_vest_color_from_crop(self, region: np.ndarray) -> dict:
         if region.size == 0:
             return {"detected": False, "confidence": 0.0}
-
-        hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
-        total_pixels = region.shape[0] * region.shape[1]
-
-        # Naranja fluorescente y amarillo fluorescente (alta saturación)
+        height = region.shape[0]
+        torso  = region[int(height * 0.30):int(height * 0.70), :]
+        if torso.size == 0:
+            torso = region
+        hsv   = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+        total = torso.shape[0] * torso.shape[1]
         ranges = [
-            ([5,  150, 150], [20, 255, 255]),   # naranja fluo
-            ([20, 150, 150], [40, 255, 255]),   # amarillo fluo
+            ([5,  150, 150], [20, 255, 255]),
+            ([20, 150, 150], [40, 255, 255]),
         ]
-
-        total_ratio = 0.0
-        for lower, upper in ranges:
-            mask        = cv2.inRange(hsv, np.array(lower), np.array(upper))
-            total_ratio += cv2.countNonZero(mask) / total_pixels
-
-        detected   = total_ratio > 0.12
-        confidence = min(0.99, total_ratio * 6)
-
+        ratio = sum(
+            cv2.countNonZero(cv2.inRange(hsv, np.array(lo), np.array(hi))) / total
+            for lo, hi in ranges
+        )
         return {
-            "detected":   detected,
-            "confidence": round(confidence, 2)
+            "detected":   ratio > 0.12,
+            "confidence": round(min(0.99, ratio * 6), 2)
         }
 
     def _empty_ppe_result(self) -> dict:
         return {
             "person_confidence": 0.0,
-            "helmet": {"detected": False, "confidence": 0.0, "color": None},
+            "helmet": {"detected": False, "confidence": 0.0,
+                       "color": None, "method": "empty"},
             "vest":   {"detected": False, "confidence": 0.0},
             "bbox":   {}
         }
