@@ -1,85 +1,139 @@
 # Edge Vision System
 
-Este proyecto implementa un sistema de visión inteligente. Está compuesto por dos servicios principales:
+## Comandos Docker Esenciales
 
-- **Detector**: Procesa imágenes o video para detectar personas y verificar que utilizan el equipo de protección personal (EPP).
-- **Action Service**: Gestiona las alertas relacionadas con el sistema de detección.
+Aquí se detallan los comandos clave para gestionar este proyecto utilizando Docker y Docker Compose.
 
-## Requisitos previos
+### Iniciar el Proyecto
+Para construir las imágenes y ejecutar los servicios:
+```bash
+docker-compose up --build
+```
+Esto compila las imágenes y lanza los contenedores según `docker-compose.yml`.
 
-Se necesita tener instalados en tu sistema las siguientes herramientas:
+### Verificar Servicios en Estado Activo
+```bash
+docker ps
+```
 
-- [Docker](https://www.docker.com/)
-- [Docker Compose](https://docs.docker.com/compose/)
+### Pausar Servicios
+```bash
+docker-compose pause
+```
+Esto detiene la ejecución de los contenedores temporalmente.
 
-## Instalación y Ejecución
+### Reanudar Servicios Pausados
+```bash
+docker-compose unpause
+```
 
-1. Clona este repositorio en tu sistema local:
+### Detener Servicios
+Para detener y eliminar contenedores en ejecución:
+```bash
+docker-compose down
+```
 
-    ```bash
-    git clone <URL-del-repositorio>
-    cd edge-vision-system
-    ```
+### Reiniciar Servicios
+Si deseas reiniciar todos los servicios (no requiere rebuilding de imágenes):
+```bash
+docker-compose restart
+```
 
-2. Inicia los servicios utilizando Docker Compose:
+### Limpiar Recursos No Utilizados
+Para limpiar recursos no utilizados (contenedores, imágenes, volumenes):
+```bash
+docker system prune
+```
 
-    ```bash
-    docker-compose up --build
-    ```
+## Ekuiper rules
 
-   Esto construirá las imágenes de Docker y levantará los servicios definidos en el archivo `docker-compose.yml`.
+Primero limpiar
 
-3. Para detener los servicios, ejecuta:
+```bash
+# Eliminar reglas y stream anteriores
+curl -X DELETE http://localhost:9081/rules/alert_high_severity
+curl -X DELETE http://localhost:9081/rules/alert_ppe_violation
+curl -X DELETE http://localhost:9081/streams/camera_events
 
-    ```bash
-    docker-compose down
-    ```
+# Verificar que quedó limpio
+curl -s http://localhost:9081/rules | python3 -m json.tool
+curl -s http://localhost:9081/streams | python3 -m json.tool
+# Ambos deben retornar: []
 
-## Servicios
+``` 
 
-### Detector
+Crear el stream
 
-- **Ruta de construcción**: `detector/`
-- **Dependencias**:
-  - Python 3.11
-  - Librerías especificadas en `requirements.txt`
-- **Variables de entorno**:
-  - `MQTT_BROKER`: Dirección del broker MQTT (por defecto: `mqtt`)
-  - `MQTT_PORT`: Puerto del broker MQTT (por defecto: `1883`)
-  - `CAMERA_INDEX`: Índice del dispositivo de cámara (por defecto: `2`)
-  - ... y más variables configuradas en `docker-compose.yml`.
+```bash
+curl -X POST http://localhost:9081/streams \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql": "CREATE STREAM camera_events() WITH (DATASOURCE=\"camera/events\", FORMAT=\"json\", TYPE=\"mqtt\", CONF_KEY=\"default\")"
+  }'
 
-### Action Service
+# Verificar
+curl -s http://localhost:9081/streams | python3 -m json.tool
+# Esperado: ["camera_events"]
 
-- **Ruta de construcción**: `action_service/`
-- **Dependencias**:
-  - Python 3.11
-  - Librerías especificadas en `requirements.txt`
-- **Variables de entorno**:
-  - `MQTT_BROKER`: Dirección del broker MQTT (por defecto: `mqtt`)
-  - `ALERT_TOPIC`: Tópico MQTT para alertas (por defecto: `edge/alerts`)
+```
 
----
+Crear las reglas
 
-## Comandos útiles
+```bash
+curl -X POST http://localhost:9081/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "alert_critical",
+    "sql": "SELECT camera_id, event_type, severity, confidence, timestamp, metadata FROM camera_events WHERE severity = '\''critical'\''",
+    "actions": [
+      {
+        "mqtt": {
+          "server": "tcp://mqtt:1883",
+          "topic": "edge/alerts",
+          "qos": 1
+        }
+      },
+      { "log": {} }
+    ]
+  }'
 
-- Para ver los contenedores en ejecución:
-  ```bash
-  docker ps
-  ```
+```
 
-- Para acceder a un contenedor en ejecución:
-  ```bash
-  docker exec -it <nombre-del-contenedor> bash
-  ```
+```bash
+curl -X POST http://localhost:9081/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "alert_high",
+    "sql": "SELECT camera_id, event_type, severity, confidence, timestamp, metadata FROM camera_events WHERE severity = '\''high'\''",
+    "actions": [
+      {
+        "mqtt": {
+          "server": "tcp://mqtt:1883",
+          "topic": "edge/alerts",
+          "qos": 1
+        }
+      },
+      { "log": {} }
+    ]
+  }'
 
-- Para limpiar imágenes y contenedores antiguos:
-  ```bash
-  docker system prune
-  ```
+```
 
-## Estructura del proyecto
+```bash
+curl -X POST http://localhost:9081/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "monitor_all",
+    "sql": "SELECT camera_id, event_type, severity, confidence, timestamp FROM camera_events WHERE event_type != '\''clear'\''",
+    "actions": [
+      {
+        "mqtt": {
+          "server": "tcp://mqtt:1883",
+          "topic": "edge/monitor",
+          "qos": 0
+        }
+      }
+    ]
+  }'
 
-- `docker-compose.yml`: Define y configura los servicios del sistema.
-- `detector/`: Contiene el servicio de detección basado en YOLO.
-- `action_service/`: Contiene el servicio de gestión de alertas.
+```
