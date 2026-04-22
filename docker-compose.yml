@@ -1,0 +1,78 @@
+version: "3.8"
+
+# All the services se comunican por nombre ("mqtt", "ekuiper")
+networks:
+  edge-net:
+    driver: bridge
+
+volumes:
+  mosquitto-data:
+  ekuiper-data:
+  ekuiper-log:
+
+services:
+
+  # MQTT Broker (Mosquitto)
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    restart: unless-stopped
+    ports:
+      - "1883:1883"       # Standard MQTT port
+      - "9001:9001"       # WebSocket port to GUI
+    volumes:
+      - ./mqtt/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto-data:/mosquitto/data
+    networks:
+      - edge-net
+
+  # Rules engine (eKuiper)
+  ekuiper:
+    image: lfedge/ekuiper:1.13-alpine
+    container_name: ekuiper-engine
+    restart: unless-stopped
+    ports:
+      - "9081:9081"       # EKuiper API rest
+    environment:
+      MQTT_SOURCE__DEFAULT__SERVER: "tcp://mqtt:1883"
+    volumes:
+      - ekuiper-data:/kuiper/data
+      - ekuiper-log:/kuiper/log
+    depends_on:
+      - mqtt
+    networks:
+      - edge-net
+
+  # Detector service
+  detector:
+    build: ./detector
+    container_name: edge-detector
+    restart: unless-stopped
+    environment:
+      MQTT_BROKER: mqtt
+      MQTT_PORT: "1883"
+      MQTT_TOPIC: camera/events
+      CAMERA_ID: cam-01
+      INTERVAL_SEC: "3"
+    depends_on:
+      - mqtt
+    networks:
+      - edge-net
+    # To access to host webcam
+    # devices:
+    #   - /dev/video0:/dev/video0
+
+  # Action service
+  action_service:
+    build: ./action_service
+    container_name: edge-actions
+    restart: unless-stopped
+    environment:
+      MQTT_BROKER: mqtt
+      MQTT_PORT: "1883"
+      ALERT_TOPIC: edge/alerts
+      ACTION_TOPIC: edge/actions
+    depends_on:
+      - mqtt
+    networks:
+      - edge-net
