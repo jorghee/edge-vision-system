@@ -1,0 +1,9 @@
+# Dependencies for Raspberry Pi (ARM64)
+# Install with: pip install -r requirements-rpi.txt
+
+paho-mqtt
+ultralytics
+opencv-python-headless
+numpy
+requests
+picamera2
