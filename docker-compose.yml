@@ -1,6 +1,6 @@
 version: "3.8"
 
-# All the services se comunican por nombre ("mqtt", "ekuiper")
+# All the services communicate by name ("mqtt", "ekuiper")
 networks:
   edge-net:
     driver: bridge
@@ -54,10 +54,13 @@ services:
       MQTT_TOPIC: camera/events
       CAMERA_ID: cam-01
       CAMERA_INDEX: "2"
+      CAMERA_BACKEND: "opencv"
       INTERVAL_SEC: "3"
       USE_SIMULATION: "false"
       MODEL_PATH: "/app/models/yolov8n.pt"
       CONFIDENCE_THR: "0.45"
+      CAPTURE_WIDTH: "640"
+      CAPTURE_HEIGHT: "480"
     depends_on:
       - mqtt
     networks:

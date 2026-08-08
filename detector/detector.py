@@ -1,3 +1,4 @@
+import ultralytics
 import json
 import time
 import os
@@ -9,77 +10,81 @@ import numpy as np
 import paho.mqtt.client as mqtt
 from ultralytics import YOLO
 
+from camera import create_camera, CAMERA_BACKEND
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [DETECTOR] %(levelname)s: %(message)s"
 )
 log = logging.getLogger(__name__)
 
-import ultralytics
 ultralytics.checks = lambda: None
 logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
-MQTT_BROKER   = os.getenv("MQTT_BROKER", "localhost")
-MQTT_PORT     = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_TOPIC    = os.getenv("MQTT_TOPIC", "camera/events")
-CAMERA_ID     = os.getenv("CAMERA_ID", "cam-01")
-CAMERA_INDEX  = int(os.getenv("CAMERA_INDEX", "2"))
-INTERVAL_SEC  = float(os.getenv("INTERVAL_SEC", "3"))
+MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", "camera/events")
+CAMERA_ID = os.getenv("CAMERA_ID", "cam-01")
+CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "2"))
+INTERVAL_SEC = float(os.getenv("INTERVAL_SEC", "3"))
 USE_SIMULATION = os.getenv("USE_SIMULATION", "false").lower() == "true"
-MODEL_PATH     = os.getenv("MODEL_PATH", "/app/models/yolov8n.pt")
+MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/yolov8n.pt")
 CONFIDENCE_THR = float(os.getenv("CONFIDENCE_THR", "0.45"))
+CAPTURE_WIDTH = int(os.getenv("CAPTURE_WIDTH", "640"))
+CAPTURE_HEIGHT = int(os.getenv("CAPTURE_HEIGHT", "480"))
+
 
 class EPPDetector:
     """
-    Detector de Equipos de Protección Personal usando YOLOv8.
+    Personal Protective Equipment Detector using YOLOv8.
 
-    El modelo yolov8n.pt fue entrenado en COCO y reconoce 80 clases.
-    La clase 0 es 'person'. Usamos esa detección como primer filtro.
+    The yolov8n.pt model was trained on COCO and recognizes 80 classes.
+    Class 0 is 'person'. We use this detection as the first filter.
 
-    Para el EPP usamos análisis de región sobre cada persona detectada:
-    - Región superior (30% de altura): cabeza, detectar casco
-    - Región media  (40% de altura): torso, detectar chaleco
+    For PPE we use region analysis on each detected person:
+    - Upper region (30% height): head, detect helmet
+    - Middle region (40% height): torso, detect vest
     """
 
-    # Clases COCO relevantes
+    # Relevant COCO classes
     COCO_PERSON_CLASS = 0
 
     EPP_CLASSES = {
-        "helmet":     0,   # casco detectado
-        "head":       1,   # cabeza sin casco
-        "person":     2,   # persona (redundante con modelo base)
+        "helmet":     0,   # helmet detected
+        "head":       1,   # head without helmet
+        "person":     2,   # person (redundant with base model)
     }
 
     def __init__(self, model_path: str, confidence: float = 0.45):
         ppe_path = os.path.join(os.path.dirname(model_path), "ppe_detector.pt")
 
-        log.info(f"[YOLO] Cargando modelo base desde {model_path}...")
+        log.info(f"[YOLO] Loading base model from {model_path}...")
         self.model_base = YOLO(model_path)
 
-        # Cargar modelo EPP si existe
+        # Load PPE model if it exists
         if os.path.exists(ppe_path):
-            log.info(f"[YOLO] Cargando modelo EPP desde {ppe_path}...")
-            self.model_ppe     = YOLO(ppe_path)
+            log.info(f"[YOLO] Loading PPE model from {ppe_path}...")
+            self.model_ppe = YOLO(ppe_path)
             self.use_ppe_model = True
-            log.info("[YOLO] Modelo EPP cargado — inferencia real de casco")
+            log.info("[YOLO] PPE model loaded — real helmet inference")
         else:
-            log.warning("[YOLO] Modelo EPP no encontrado, usando análisis de color")
-            self.model_ppe     = None
+            log.warning("[YOLO] PPE model not found, using color analysis")
+            self.model_ppe = None
             self.use_ppe_model = False
 
         self.confidence = confidence
-        log.info("[YOLO] Modelos listos")
+        log.info("[YOLO] Models ready")
 
     def detect_persons(self, frame: np.ndarray) -> list:
         """
-        Ejecuta YOLOv8 sobre el frame completo.
-        Retorna lista de bounding boxes de personas detectadas.
-        Cada bbox es (x1, y1, x2, y2, confidence).
+        Executes YOLOv8 on the full frame.
+        Returns list of bounding boxes for detected persons.
+        Each bbox is (x1, y1, x2, y2, confidence).
         """
         results = self.model_base(
             frame,
             conf=self.confidence,
-            classes=[self.COCO_PERSON_CLASS],  # Solo detectar personas
+            classes=[self.COCO_PERSON_CLASS],  # Only detect persons
             verbose=False
         )
 
@@ -94,8 +99,8 @@ class EPPDetector:
 
     def analyze_ppe(self, frame: np.ndarray, bbox: tuple) -> dict:
         """
-        Analiza EPP de una persona.
-        Usa modelo EPP si está disponible, color HSV como fallback.
+        Analyzes a person's PPE.
+        Uses PPE model if available, HSV color as fallback.
         """
         x1, y1, x2, y2, person_conf = bbox
         person_crop = frame[y1:y2, x1:x2]
@@ -110,33 +115,33 @@ class EPPDetector:
 
     def _analyze_with_model(self, crop: np.ndarray, person_conf: float, bbox: tuple) -> dict:
         """
-        Inferencia real con modelo fine-tuned.
-        Corre localmente en CPU — sin internet, sin nube.
+        Real inference with fine-tuned model.
+        Runs locally on CPU — no internet, no cloud.
         """
         x1, y1, x2, y2, _ = bbox
         results = self.model_ppe(crop, conf=self.confidence, verbose=False)
 
-        helmet_detected    = False
-        helmet_confidence  = 0.0
-        head_detected      = False   # cabeza sin casco
+        helmet_detected = False
+        helmet_confidence = 0.0
+        head_detected = False   # head without helmet
 
         for result in results:
             for box in result.boxes:
-                cls  = int(box.cls[0])
+                cls = int(box.cls[0])
                 conf = float(box.conf[0])
 
                 if cls == self.EPP_CLASSES["helmet"]:
-                    helmet_detected   = True
+                    helmet_detected = True
                     helmet_confidence = max(helmet_confidence, conf)
 
                 elif cls == self.EPP_CLASSES["head"]:
-                    head_detected = True   # confirma que hay cabeza visible
+                    head_detected = True   # confirms there is a visible head
 
-        # Si detectó cabeza pero no casco → no_helmet confirmado
-        # Si no detectó ni cabeza ni casco → persona de espaldas, ignorar
+        # If head detected but no helmet → no_helmet confirmed
+        # If neither head nor helmet detected → person facing away, ignore
         if not head_detected and not helmet_detected:
-            # No se puede determinar — asumir compliant para no generar falsos
-            helmet_detected   = True
+            # Cannot determine — assume compliant to avoid false positives
+            helmet_detected = True
             helmet_confidence = 0.5
 
         return {
@@ -147,17 +152,17 @@ class EPPDetector:
                 "color":      None,
                 "method":     "yolo_model"
             },
-            # Este modelo no detecta chaleco — usar color como complemento
+            # This model does not detect vest — use color as complement
             "vest": self._detect_vest_color_from_crop(crop),
             "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
         }
 
     def _analyze_with_color(self, crop: np.ndarray, person_conf: float, bbox: tuple) -> dict:
-        """Fallback: análisis de color HSV cuando no hay modelo EPP."""
+        """Fallback: HSV color analysis when there is no PPE model."""
         x1, y1, x2, y2, _ = bbox
         height = crop.shape[0]
 
-        head_region  = crop[0:int(height * 0.30), :]
+        head_region = crop[0:int(height * 0.30), :]
         torso_region = crop[int(height * 0.30):int(height * 0.70), :]
 
         return {
@@ -169,11 +174,11 @@ class EPPDetector:
 
     def _detect_helmet_color(self, region: np.ndarray) -> dict:
         """
-        Detecta casco por análisis de color en HSV.
-        Colores típicos de cascos de seguridad en minería:
-        - Amarillo / Naranja (más comunes)
-        - Blanco (supervisores)
-        - Rojo (visitantes)
+        Detects helmet by HSV color analysis.
+        Typical safety helmet colors in mining:
+        - Yellow / Orange (most common)
+        - White (supervisors)
+        - Red (visitors)
         """
         if region.size == 0:
             return {"detected": False, "confidence": 0.0, "color": None}
@@ -185,21 +190,21 @@ class EPPDetector:
             "yellow": ([15, 80, 80],  [35, 255, 255]),
             "orange": ([5,  80, 80],  [15, 255, 255]),
             "white":  ([0,  0,  180], [180, 30, 255]),
-            "red":    ([0,  100, 100],[5,  255, 255]),
+            "red":    ([0,  100, 100], [5,  255, 255]),
         }
 
-        best_color    = None
-        best_ratio    = 0.0
+        best_color = None
+        best_ratio = 0.0
 
         for color_name, (lower, upper) in color_ranges.items():
-            mask  = cv2.inRange(hsv, np.array(lower), np.array(upper))
+            mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
             ratio = cv2.countNonZero(mask) / total_pixels
             if ratio > best_ratio:
                 best_ratio = ratio
                 best_color = color_name
 
-        # Umbral: al menos 8% de la región de cabeza debe ser del color del casco
-        detected   = best_ratio > 0.08
+        # Threshold: at least 8% of the head region must be the helmet color
+        detected = best_ratio > 0.08
         confidence = min(0.99, best_ratio * 8)
 
         return {
@@ -212,17 +217,18 @@ class EPPDetector:
         if region.size == 0:
             return {"detected": False, "confidence": 0.0}
         height = region.shape[0]
-        torso  = region[int(height * 0.30):int(height * 0.70), :]
+        torso = region[int(height * 0.30):int(height * 0.70), :]
         if torso.size == 0:
             torso = region
-        hsv   = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
         total = torso.shape[0] * torso.shape[1]
         ranges = [
             ([5,  150, 150], [20, 255, 255]),
             ([20, 150, 150], [40, 255, 255]),
         ]
         ratio = sum(
-            cv2.countNonZero(cv2.inRange(hsv, np.array(lo), np.array(hi))) / total
+            cv2.countNonZero(cv2.inRange(
+                hsv, np.array(lo), np.array(hi))) / total
             for lo, hi in ranges
         )
         return {
@@ -240,35 +246,39 @@ class EPPDetector:
         }
 
 # MQTT Callbacks
+
+
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        log.info(f"[MQTT] Conectado al broker MQTT en {MQTT_BROKER}:{MQTT_PORT}")
+        log.info(f"[MQTT] Connected to MQTT broker at {
+                 MQTT_BROKER}:{MQTT_PORT}")
     else:
-        log.error(f"[MQTT] Error de conexión MQTT, código: {rc}")
+        log.error(f"[MQTT] MQTT connection error, code: {rc}")
+
 
 def build_event(person_id: int, ppe: dict, frame_num: int) -> dict:
     """
-    Construye el payload JSON estándar del sistema.
-    Determina el tipo de evento y severidad según el EPP detectado.
+    Builds the standard JSON payload of the system.
+    Determines event type and severity based on detected PPE.
     """
     helmet_ok = ppe["helmet"]["detected"]
-    vest_ok   = ppe["vest"]["detected"]
+    vest_ok = ppe["vest"]["detected"]
 
-    # Determinar tipo de evento y severidad
+    # Determine event type and severity
     if not helmet_ok and not vest_ok:
         event_type = "no_helmet_no_vest"
-        severity   = "critical"
+        severity = "critical"
     elif not helmet_ok:
         event_type = "no_helmet"
-        severity   = "high"
+        severity = "high"
     elif not vest_ok:
         event_type = "no_vest"
-        severity   = "high"
+        severity = "high"
     else:
         event_type = "ppe_compliant"
-        severity   = "none"
+        severity = "none"
 
-    # Confianza global: promedio de las detecciones
+    # Global confidence: average of detections
     confidence = round(
         (ppe["person_confidence"] +
          ppe["helmet"]["confidence"] +
@@ -300,39 +310,40 @@ def build_event(person_id: int, ppe: dict, frame_num: int) -> dict:
         }
     }
 
+
 def run_yolo_detector(client: mqtt.Client):
     detector = EPPDetector(MODEL_PATH, CONFIDENCE_THR)
 
-    log.info(f"[CAM] Abriendo dispositivo {CAMERA_INDEX}...")
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    log.info("[CAM] Initializing camera (backend=%s)...", CAMERA_BACKEND)
+    cam = create_camera(CAMERA_INDEX)
+    cam.set_resolution(CAPTURE_WIDTH, CAPTURE_HEIGHT)
 
-    if not cap.isOpened():
-        log.error(f"[CAM] No se pudo abrir {CAMERA_INDEX}")
+    try:
+        cam.open()
+    except RuntimeError:
+        log.error("[CAM] Could not open the camera", exc_info=True)
         return
 
-    # Configurar resolución (reducir carga de CPU)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 15)
+    log.info(
+        "[CAM] Camera ready: %dx%d", CAPTURE_WIDTH, CAPTURE_HEIGHT,
+    )
+    log.info("[SYS] Publishing to '%s' every %ss", MQTT_TOPIC, INTERVAL_SEC)
 
-    log.info(f"[CAM] Cámara lista: 640x480 @ 15fps")
-    log.info(f"[SYS] Publicando en '{MQTT_TOPIC}' cada {INTERVAL_SEC}s")
-
-    frame_num      = 0
-    last_publish   = 0.0
+    frame_num = 0
+    last_publish = 0.0
 
     try:
         while True:
-            ret, frame = cap.read()
+            ret, frame = cam.read()
             if not ret:
-                log.warning("[CAM] Frame perdido, reintentando...")
+                log.warning("[CAM] Dropped frame, retrying...")
                 time.sleep(0.5)
                 continue
 
             frame_num += 1
             now = time.time()
 
-            # Publicar solo cada INTERVAL_SEC segundos
+            # Publish only every INTERVAL_SEC seconds
             if (now - last_publish) < INTERVAL_SEC:
                 continue
 
@@ -341,7 +352,7 @@ def run_yolo_detector(client: mqtt.Client):
             persons = detector.detect_persons(frame)
 
             if not persons:
-                # Sin personas en el frame: publicar evento "clear"
+                # No persons in frame: publish "clear" event
                 event = {
                     "camera_id":  CAMERA_ID,
                     "timestamp":  datetime.utcnow().isoformat() + "Z",
@@ -352,30 +363,34 @@ def run_yolo_detector(client: mqtt.Client):
                     "metadata":   {"frame": frame_num, "persons_detected": 0}
                 }
                 client.publish(MQTT_TOPIC, json.dumps(event), qos=1)
-                log.info(f"[FRAME {frame_num}] Sin personas detectadas")
+                log.info("[FRAME %d] No persons detected", frame_num)
                 continue
 
-            log.info(f"[FRAME {frame_num}] {len(persons)} persona(s) detectada(s)")
+            log.info(
+                "[FRAME %d] %d person(s) detected", frame_num, len(persons),
+            )
 
-            # Analizar EPP de cada persona
+            # Analyze PPE for each person
             for person_id, bbox in enumerate(persons):
-                ppe   = detector.analyze_ppe(frame, bbox)
+                ppe = detector.analyze_ppe(frame, bbox)
                 event = build_event(person_id, ppe, frame_num)
 
                 client.publish(MQTT_TOPIC, json.dumps(event), qos=1)
 
-                helmet_status = "[CHECK] CASCO" if ppe["helmet"]["detected"] else "❌ SIN CASCO"
-                vest_status   = "[CHECK] CHALECO" if ppe["vest"]["detected"] else "❌ SIN CHALECO"
+                helmet_status = "[CHECK] HELMET" if ppe["helmet"]["detected"] else "NO HELMET"
+                vest_status = "[CHECK] VEST" if ppe["vest"]["detected"] else "NO VEST"
                 log.info(
-                    f"  Persona {person_id}: {helmet_status} | {vest_status} "
-                    f"| evento={event['event_type']} | severidad={event['severity']}"
+                    "  Person %d: %s | %s | event=%s | severity=%s",
+                    person_id, helmet_status, vest_status,
+                    event["event_type"], event["severity"],
                 )
 
     except KeyboardInterrupt:
-        log.info("[SYS] Detector detenido por el usuario")
+        log.info("[SYS] Detector stopped by user")
     finally:
-        cap.release()
-        log.info("[CAM] Cámara liberada")
+        cam.release()
+        log.info("[CAM] Camera released")
+
 
 def run_simulation(client: mqtt.Client):
     import random
@@ -387,10 +402,10 @@ def run_simulation(client: mqtt.Client):
         ("clear",          "none",     0.99),
     ]
     frame_num = 0
-    log.info("[SIM] Modo simulación activo (USE_SIMULATION=true)")
+    log.info("[SIM] Simulation mode active (USE_SIMULATION=true)")
     while True:
         frame_num += 1
-        event_type, confidence = random.choice(EVENTS)
+        event_type, severity, confidence = random.choice(EVENTS)
         event = {
             "camera_id":  CAMERA_ID,
             "timestamp":  datetime.utcnow().isoformat() + "Z",
@@ -401,24 +416,25 @@ def run_simulation(client: mqtt.Client):
             "metadata":   {"frame": frame_num, "zone": "entrada-principal"}
         }
         client.publish(MQTT_TOPIC, json.dumps(event), qos=1)
-        log.info(f"[SIM] {event_type} | severidad={confidence}")
+        log.info("[SIM] %s | severity=%s", event_type, severity)
         time.sleep(INTERVAL_SEC)
+
 
 def main():
     # Configure MQTT client
     client = mqtt.Client(client_id=f"detector-{CAMERA_ID}")
     client.on_connect = on_connect
 
-    log.info(f"[MQTT] Conectando a {MQTT_BROKER}:{MQTT_PORT}...")
+    log.info(f"[MQTT] Connecting to {MQTT_BROKER}:{MQTT_PORT}...")
     for attempt in range(10):
         try:
             client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
             break
         except Exception as e:
-            log.warning(f"[MQTT] Intento {attempt+1}/10 fallido: {e}")
+            log.warning(f"[MQTT] Attempt {attempt+1}/10 failed: {e}")
             time.sleep(3)
     else:
-        log.error("[MQTT] No se pudo conectar. Abortando.")
+        log.error("[MQTT] Could not connect. Aborting.")
         return
 
     client.loop_start()
@@ -430,6 +446,7 @@ def main():
 
     client.loop_stop()
     client.disconnect()
+
 
 if __name__ == "__main__":
     main()
