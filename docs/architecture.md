@@ -6,12 +6,12 @@ El Edge Vision System está diseñado bajo un paradigma de microservicios orient
 
 ```mermaid
 graph TD
-    CAM["🎥 Cámara<br/>(USB/CSI)"] -->|Frames| DET["🔍 Detector<br/>(YOLOv8 + Análisis EPP)"]
+    CAM["Cámara<br/>(USB/CSI)"] -->|Frames| DET["Detector<br/>(YOLOv8 + Análisis EPP)"]
     
     subgraph Edge System
-        DET -->|MQTT: camera/events| MQTT["📡 Broker MQTT<br/>(Mosquitto)"]
-        MQTT <-->|Streams & Actions| EK["⚙️ eKuiper<br/>(Motor de Reglas)"]
-        MQTT -->|MQTT: edge/alerts| ACT["🚨 Action Service<br/>(Notificaciones)"]
+        DET -->|MQTT: camera/events| MQTT["Broker MQTT<br/>(Mosquitto)"]
+        MQTT <-->|Streams y Actions| EK["eKuiper<br/>(Motor de Reglas)"]
+        MQTT -->|MQTT: edge/alerts| ACT["Action Service<br/>(Notificaciones)"]
         ACT -->|MQTT: edge/actions| MQTT
     end
 ```
