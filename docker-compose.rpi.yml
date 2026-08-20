@@ -1,9 +1,7 @@
 version: "3.8"
 
-# Docker Compose for Raspberry Pi
-# The detector runs natively (outside Docker) for direct
-# access to the CSI camera via Picamera2. Only the
-# infrastructure services (MQTT, eKuiper, Action Service) run in Docker.
+# The detector runs natively (outside Docker) for direct access to the CSI
+# camera via Picamera2. Only infrastructure services run in Docker.
 
 networks:
   edge-net:
@@ -16,27 +14,26 @@ volumes:
 
 services:
 
-  # MQTT Broker (Mosquitto) - multi-arch images available
   mqtt:
     image: eclipse-mosquitto:2.0
     container_name: mqtt-broker
     restart: unless-stopped
     ports:
-      - "1883:1883"       # Standard MQTT port
-      - "9001:9001"       # WebSocket port to GUI
+      - "1883:1883"
+      - "9001:9001"
     volumes:
-      - ./mqtt/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./infrastructure/mqtt/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - mosquitto-data:/mosquitto/data
     networks:
       - edge-net
 
-  # Rules engine (eKuiper) - use slim instead of alpine for ARM64
+  # slim instead of alpine for ARM64 compatibility
   ekuiper:
     image: lfedge/ekuiper:1.13-slim
     container_name: ekuiper-engine
     restart: unless-stopped
     ports:
-      - "9081:9081"       # EKuiper API rest
+      - "9081:9081"
     environment:
       MQTT_SOURCE__DEFAULT__SERVER: "tcp://mqtt:1883"
     volumes:
@@ -47,9 +44,8 @@ services:
     networks:
       - edge-net
 
-  # Action service - lightweight, only paho-mqtt
   action_service:
-    build: ./action_service
+    build: ./services/action_service
     container_name: edge-actions
     restart: unless-stopped
     environment:
@@ -61,9 +57,3 @@ services:
       - mqtt
     networks:
       - edge-net
-
-  # NOTE: The detector is NOT in Docker in this configuration.
-  # It runs natively on the RPi with:
-  #   cd detector && bash run_rpi.sh
-  # This allows direct access to the CSI camera via Picamera2
-  # without the need for --privileged or device passthrough.

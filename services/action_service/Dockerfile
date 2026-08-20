@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY action_service.py .
+COPY src/action_service.py .
 
 ENV MQTT_BROKER=mqtt
 ENV MQTT_PORT=1883

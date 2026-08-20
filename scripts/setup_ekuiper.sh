@@ -1,26 +1,27 @@
 #!/bin/bash
-# ============================================================================
-# Configuration about eKuiper rules
-# ============================================================================
+# Provisions eKuiper with streams and SQL filtering rules.
+# Idempotent: safe to re-run; deletes existing config before recreating.
+
+set -euo pipefail
 
 EKUIPER_HOST="${EKUIPER_HOST:-localhost}"
 EKUIPER_PORT="${EKUIPER_PORT:-9081}"
 API_URL="http://${EKUIPER_HOST}:${EKUIPER_PORT}"
 
-echo "[1/4] Limpiando configuración previa..."
+echo "[1/4] Cleaning previous configuration..."
 curl -s -X DELETE "${API_URL}/rules/alert_critical" > /dev/null
 curl -s -X DELETE "${API_URL}/rules/alert_high" > /dev/null
 curl -s -X DELETE "${API_URL}/rules/monitor_all" > /dev/null
 curl -s -X DELETE "${API_URL}/streams/camera_events" > /dev/null
 
-echo "[2/4] Creando stream 'camera_events'..."
+echo "[2/4] Creating stream 'camera_events'..."
 curl -s -X POST "${API_URL}/streams" \
   -H "Content-Type: application/json" \
   -d '{
     "sql": "CREATE STREAM camera_events() WITH (DATASOURCE=\"camera/events\", FORMAT=\"json\", TYPE=\"mqtt\", CONF_KEY=\"default\")"
   }' > /dev/null
 
-echo "[3/4] Creando regla 'alert_critical'..."
+echo "[3/4] Creating rule 'alert_critical'..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{
@@ -32,7 +33,7 @@ curl -s -X POST "${API_URL}/rules" \
     ]
   }' > /dev/null
 
-echo "[4/4] Creando regla 'alert_high' y 'monitor_all'..."
+echo "[4/4] Creating rules 'alert_high' and 'monitor_all'..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{
@@ -54,4 +55,4 @@ curl -s -X POST "${API_URL}/rules" \
     ]
   }' > /dev/null
 
-echo "[✓] Configuración de eKuiper completada exitosamente."
+echo "[OK] eKuiper configuration completed."

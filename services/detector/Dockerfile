@@ -14,14 +14,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Model download
-COPY download_model.py .
+COPY scripts/download_model.py .
 RUN python3 download_model.py
 
-COPY camera.py .
-COPY detector.py .
-COPY health_monitor.py .
-COPY export_model.py .
+COPY src/camera.py .
+COPY src/detector.py .
+COPY src/health_monitor.py .
+COPY scripts/export_model.py .
 
 ENV MQTT_BROKER=mqtt
 ENV MQTT_PORT=1883
