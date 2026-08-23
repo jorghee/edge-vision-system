@@ -5,7 +5,7 @@ Executed during Docker build, not at runtime.
 import os
 import requests
 
-MODELS_DIR = "/app/models"
+MODELS_DIR = os.getenv("MODELS_DIR", "/app/models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 YOLO_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt"
