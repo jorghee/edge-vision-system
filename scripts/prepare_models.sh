@@ -19,8 +19,18 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
+VENV_DIR="${DETECTOR_DIR}/venv"
+if [ ! -d "${VENV_DIR}" ]; then
+    echo "[INFO] Creating virtual environment at ${VENV_DIR}..."
+    python3 -m venv "${VENV_DIR}"
+fi
+
+echo "[INFO] Activating virtual environment and installing dependencies..."
+source "${VENV_DIR}/bin/activate"
+pip install -r "${DETECTOR_DIR}/requirements.txt" --quiet
+
 if ! python3 -c "import ultralytics" >/dev/null 2>&1; then
-    echo "[ERROR] ultralytics package is missing. Please install dependencies first."
+    echo "[ERROR] Failed to install required packages (e.g., ultralytics)."
     exit 1
 fi
 
