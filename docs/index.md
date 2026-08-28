@@ -1,31 +1,56 @@
-# Edge Vision System
+# Edge Vision System — Documentation
 
-Bienvenido a la documentación oficial del **Edge Vision System**. Este proyecto implementa una solución de visión artificial ligera orientada al Edge Computing (procesamiento en el borde) para la detección de personas y el cumplimiento del uso de Equipos de Protección Personal (EPP), específicamente cascos y chalecos.
+Technical documentation for the Edge Vision System. This project implements a lightweight computer vision solution for Edge Computing, detecting people and verifying the use of Personal Protective Equipment (PPE) — helmets and vests — on resource-constrained IoT devices.
 
-## Resumen del Proyecto
+## Overview
 
-El sistema está diseñado para capturar video en tiempo real desde una cámara local, procesar los frames para identificar personas y verificar el uso de EPP, y publicar eventos estructurados. Utiliza un motor de reglas ligero (eKuiper) para filtrar el ruido y reenviar únicamente las alertas relevantes (ej. violaciones de seguridad) hacia un servicio de acción.
+The system captures video in real-time from a local camera, processes frames to identify people, verifies PPE compliance, and publishes structured events via MQTT. A lightweight rules engine (eKuiper) filters noise at the edge, forwarding only critical alerts to an action service.
 
-## Tabla de Contenidos
+## Table of Contents
 
-1. [Arquitectura y Flujo de Datos](architecture.md)
-2. [Sistema de Detección](detector.md)
-3. [Configuración y Despliegue](deployment.md)
+| Document | Description |
+| :--- | :--- |
+| [Architecture and Data Flow](architecture.md) | Component diagram, MQTT communication flow, eKuiper's role. |
+| [Detection System](detector.md) | Camera abstraction, YOLO models, PPE evaluation, health monitor. |
+| [Configuration and Deployment](deployment.md) | Automated and manual deployment, model conversion, troubleshooting. |
 
-## Componentes Principales
+## Project Structure
 
-El sistema se compone de cuatro piezas fundamentales, orquestadas y comunicadas a través de MQTT:
+```
+edge-vision-system/
+├── services/
+│   ├── detector/                 # Vision service
+│   │   ├── src/                  # detector.py, camera.py, health_monitor.py
+│   │   ├── scripts/              # download_model.py, export_model.py
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── requirements-rpi.txt
+│   └── action_service/           # Alert response service
+│       ├── src/                  # action_service.py
+│       ├── Dockerfile
+│       └── requirements.txt
+├── infrastructure/
+│   └── mqtt/config/              # mosquitto.conf
+├── scripts/                      # Deployment automation
+│   ├── deploy.sh                 # Full laptop → RPi deployment
+│   ├── prepare_models.sh         # Model download and NCNN export
+│   ├── start_laptop.sh           # Local execution (full Docker)
+│   ├── start_rpi.sh              # RPi execution (hybrid)
+│   ├── run_rpi.sh                # Native detector launch
+│   └── setup_ekuiper.sh          # SQL rules provisioning
+├── docs/                         # Technical documentation
+├── docker-compose.yml            # x86_64 orchestration
+└── docker-compose.rpi.yml        # ARM64 orchestration (RPi)
+```
 
-* **Detector de Visión**: Componente en Python que captura el flujo de video, ejecuta inferencia utilizando YOLOv8 y publica eventos detallados sobre cada frame procesado.
-* **Broker MQTT (Mosquitto)**: Actúa como el bus central de mensajería del sistema, permitiendo una comunicación asíncrona y desacoplada entre todos los servicios.
-* **Motor de Reglas (eKuiper)**: Un motor SQL ligero para Edge Computing. Se encarga de procesar el flujo continuo de eventos del detector, aplicar lógica de filtrado por severidad y redirigir las alertas críticas.
-* **Action Service**: Servicio responsable de escuchar las alertas filtradas por eKuiper y ejecutar las acciones de respuesta correspondientes (actualmente logging y publicación de recomendaciones).
+## Key Dependencies
 
-## Dependencias Clave
-
-* **Docker & Docker Compose**: Para orquestar los servicios de infraestructura.
-* **Python 3.11+**: Lenguaje principal de los servicios personalizados (detector y action_service).
-* **Ultralytics (YOLOv8)**: Framework para detección de objetos.
-* **OpenCV / Picamera2**: Manejo de captura de imágenes y manipulación matricial.
-* **Eclipse Mosquitto**: Broker MQTT.
-* **LF Edge eKuiper**: Motor de streaming y procesamiento de reglas en el borde.
+| Dependency | Purpose |
+| :--- | :--- |
+| Docker & Docker Compose | Infrastructure orchestration (MQTT, eKuiper, Action Service). |
+| Python 3.11+ | Runtime for the detector and action service. |
+| Ultralytics (YOLOv8) | Object detection framework. |
+| OpenCV / Picamera2 | Image capture (USB webcam / RPi CSI camera). |
+| Eclipse Mosquitto | MQTT broker. |
+| LF Edge eKuiper | Edge stream processing and SQL rules engine. |
+| NCNN | Optimized neural network inference on ARM (NEON SIMD). |

@@ -1,54 +1,64 @@
-# Sistema de Detección
+# Detection System
 
-El núcleo de la visión artificial reside en el módulo `detector`. Su responsabilidad principal es procesar las imágenes en crudo, identificar a las personas presentes en la escena y evaluar el cumplimiento del uso de Equipos de Protección Personal (EPP).
+The core of the computer vision pipeline resides in the detector module (`services/detector/src/`). Its primary responsibility is processing raw images, identifying people in the scene, and evaluating Personal Protective Equipment (PPE) compliance.
 
-## Abstracción de Cámara
+## Camera Abstraction
 
-Para facilitar el despliegue tanto en entornos de desarrollo local como en sistemas IoT (como Raspberry Pi), se incluye el módulo `camera.py`. Este componente expone una interfaz común (`Camera`) soportada por distintos backends de captura:
+The module `services/detector/src/camera.py` provides a unified interface (`Camera` protocol) supported by two backends:
 
-* **OpenCVCamera**: Utiliza la librería estándar `cv2.VideoCapture`. Está diseñado para inicializar y capturar de cámaras USB (webcams) en arquitecturas x86 (Laptops o Servidores).
-* **PiCamera**: Utiliza la librería `picamera2` e interactúa nativamente con `libcamera`. Es el método oficial y de alto rendimiento para interactuar con cámaras conectadas por CSI en Raspberry Pi (ej. Raspberry Pi Camera Rev 1.3).
+| Backend | Class | Use Case | Library |
+| :--- | :--- | :--- | :--- |
+| **OpenCV** | `OpenCVCamera` | USB webcams on x86_64 (laptops/servers) | `cv2.VideoCapture` |
+| **Picamera2** | `PiCamera` | CSI cameras on Raspberry Pi | `picamera2` + `libcamera` |
 
-La selección del backend se realiza dinámicamente mediante la variable de entorno `CAMERA_BACKEND` (`"opencv"`, `"picamera2"`, o `"auto"`).
+Backend selection is controlled by the `CAMERA_BACKEND` environment variable (`"opencv"`, `"picamera2"`, or `"auto"`). In `auto` mode, the factory attempts Picamera2 first and falls back to OpenCV.
 
-## Detección Base (Personas)
+## Base Detection (People)
 
-El procesamiento inicial de cada frame se ejecuta con **YOLOv8** (usualmente la variante ultraligera `yolov8n`). La red neuronal base está pre-entrenada en el dataset COCO, lo que permite aprovechar su alta precisión. El script restringe la detección para aislar exclusivamente la clase `0` (Persona) e ignorar el resto del espectro del modelo.
+Each frame is processed with **YOLOv8** (typically the `yolov8n` nano variant). The network is pre-trained on COCO, providing high-accuracy detection. The detector filters exclusively for class `0` (Person), ignoring all other classes.
 
-## Detección de EPP (Cascos y Chalecos)
+On Raspberry Pi, models are exported to **NCNN** format for optimized ARM inference using NEON SIMD instructions. The export is handled by `services/detector/scripts/export_model.py`.
 
-Una vez ubicadas las personas en la escena (Bounding Boxes), el detector recorta estas regiones específicas y las procesa para identificar equipo de seguridad.
+## PPE Detection (Helmets and Vests)
 
-Existen dos estrategias concurrentes para este fin:
+Once people are located (bounding boxes), the detector crops each region and applies two concurrent strategies:
 
-1. **Modelo Fine-Tuned (Primario)**:
-   Si el sistema detecta que se ha descargado un modelo especializado (ej. `ppe_detector.pt`), realiza la inferencia directamente sobre el recorte de la persona. Estos modelos proveen alta precisión para detectar si hay un casco presente de forma robusta frente a diferentes niveles de iluminación.
+### Primary: Fine-Tuned Model
 
-2. **Análisis por Color HSV (Fallback y Complemento)**:
-   Si el modelo EPP primario no está disponible, o para detectar chalecos (para los cuales el modelo secundario no ha sido entrenado), se aplica un enfoque clásico de segmentación de color:
-   * El recorte de la persona se divide geométricamente (ej. el tercio superior corresponde a la cabeza, el sector medio al torso).
-   * La región resultante se transfiere del espacio de color BGR a HSV (Tono, Saturación, Valor).
-   * Se evalúan proporciones de píxeles activos aplicando máscaras basadas en colores típicos de los EPP (Amarillo, Naranja, Rojo, Blanco).
-   * Si la densidad del color deseado supera un umbral prestablecido en las áreas de interés, se dictamina como "detectado".
+If a specialized model (`ppe_detector.pt` or its NCNN equivalent) is available, the system runs inference directly on the person crop. This model (`keremberke/yolov8n-hard-hat-detection`) is trained specifically for hard hat detection and provides robust results across varying lighting conditions.
 
-## Evaluador de Severidad
+### Fallback: HSV Color Analysis
 
-Dependiendo de la presencia del casco y el chaleco en la persona analizada, el sistema asigna una clasificación general al evento:
-* **`none` (Evento `ppe_compliant`)**: Ambos elementos (casco y chaleco) fueron detectados correctamente.
-* **`high` (Evento `no_helmet` o `no_vest`)**: Se identifica una falta parcial de los EPP.
-* **`critical` (Evento `no_helmet_no_vest`)**: La persona en escena carece de los dos elementos obligatorios.
+When the PPE model is unavailable, or for vest detection (which the fine-tuned model does not cover), a classical color segmentation approach is applied:
 
-Además, cuando el procesador evalúa un frame sin ninguna persona detectada, emite un evento preventivo `clear`, informando al sistema que la zona visual se encuentra despejada.
+| Step | Detail |
+| :--- | :--- |
+| Region splitting | The person crop is divided geometrically: upper third (head), middle section (torso). |
+| Color space | The region is converted from BGR to HSV (Hue, Saturation, Value). |
+| Mask evaluation | Pixel density is measured against masks for typical PPE colors (yellow, orange, red, white). |
+| Threshold | If the target color density exceeds a preset threshold in the area of interest, the item is marked as "detected". |
 
-## Monitoreo de Hardware (Health Monitor)
+## Severity Evaluation
 
-Procesar inferencia continua genera estrés sostenido en los procesadores locales. El módulo `health_monitor.py` funciona como un script satélite que extrae métricas de telemetría del hardware.
+Based on helmet and vest presence, the system assigns a classification:
 
-Cada 30 segundos, publica la siguiente información en el topic `edge/health`:
-* Temperatura del CPU (°C).
-* Porcentaje de uso del procesador (basado en _load average_).
-* Estado de la memoria RAM (Total, Usada y Porcentaje).
-* Uso de disco de la partición raíz.
-* Estado de Throttling del SoC (particularmente importante para evitar daños en Raspberry Pi).
+| Severity | Event Type | Condition |
+| :--- | :--- | :--- |
+| `none` | `ppe_compliant` | Both helmet and vest detected. |
+| `high` | `no_helmet` / `no_vest` | Partial PPE absence. |
+| `critical` | `no_helmet_no_vest` | Both items missing. |
+| `info` | `clear` | No person detected in the frame. |
 
-Esta información adicional permite ampliar las reglas de eKuiper para prevenir sobrecalentamientos térmicos y administrar la disponibilidad del dispositivo IoT de forma autónoma.
+## Health Monitor
+
+The module `services/detector/src/health_monitor.py` is a companion process that extracts hardware telemetry. It publishes to `edge/health` every 30 seconds:
+
+| Metric | Source |
+| :--- | :--- |
+| CPU temperature (°C) | `/sys/class/thermal/` |
+| CPU usage (%) | Load average |
+| RAM (total, used, %) | `/proc/meminfo` |
+| Disk usage | Root partition |
+| SoC throttling state | `vcgencmd get_throttled` |
+
+This telemetry can be consumed by eKuiper rules to prevent thermal damage and manage device availability autonomously.
