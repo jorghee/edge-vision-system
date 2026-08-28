@@ -47,14 +47,26 @@ if [ ! -f "${BASE_MODEL}" ]; then
 fi
 
 echo "[3/4] Exporting models to NCNN..."
-# The export_model.py script generates the NCNN model directory next to the input model.
-export_cmd="python3 \"${SCRIPTS_DIR}/export_model.py\" --base \"${BASE_MODEL}\" --format ncnn"
+BASE_NCNN_DIR="${MODELS_DIR}/yolov8n_ncnn_model"
+PPE_NCNN_DIR="${MODELS_DIR}/ppe_detector_ncnn_model"
 
-if [ -f "${PPE_MODEL}" ]; then
-    export_cmd="${export_cmd} --ppe \"${PPE_MODEL}\""
+NEEDS_EXPORT=false
+if [ ! -d "${BASE_NCNN_DIR}" ]; then
+    NEEDS_EXPORT=true
+fi
+if [ -f "${PPE_MODEL}" ] && [ ! -d "${PPE_NCNN_DIR}" ]; then
+    NEEDS_EXPORT=true
 fi
 
-eval "${export_cmd}"
+if [ "${NEEDS_EXPORT}" = true ]; then
+    export_args="--base \"${BASE_MODEL}\" --format ncnn"
+    if [ -f "${PPE_MODEL}" ]; then
+        export_args="${export_args} --ppe \"${PPE_MODEL}\""
+    fi
+    eval "python3 \"${SCRIPTS_DIR}/export_model.py\" ${export_args}"
+else
+    echo "[INFO] NCNN models already exist, skipping export."
+fi
 
 echo "[4/4] Verifying exports..."
 BASE_NCNN_DIR="${MODELS_DIR}/yolov8n_ncnn_model"

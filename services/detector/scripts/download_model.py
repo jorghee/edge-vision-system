@@ -30,28 +30,30 @@ PPE_HF_URL = (
 )
 
 ppe_path = f"{MODELS_DIR}/ppe_detector.pt"
-print("[SETUP] Downloading PPE model (helmet/vest) from HuggingFace...")
 
-try:
-    response = requests.get(PPE_HF_URL, stream=True, timeout=120)
-    response.raise_for_status()
+if not os.path.exists(ppe_path):
+    print("[SETUP] Downloading PPE model (helmet/vest) from HuggingFace...")
 
-    total = int(response.headers.get("content-length", 0))
-    downloaded = 0
+    try:
+        response = requests.get(PPE_HF_URL, stream=True, timeout=120)
+        response.raise_for_status()
 
-    with open(ppe_path, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-            downloaded += len(chunk)
-            if total:
-                pct = downloaded / total * 100
-                print(f"\r[SETUP] Downloading PPE model... {pct:.1f}%", end="")
+        total = int(response.headers.get("content-length", 0))
+        downloaded = 0
 
-    print(f"\n[SETUP] ppe_detector.pt saved ({downloaded/1e6:.1f} MB)")
+        with open(ppe_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total:
+                    pct = downloaded / total * 100
+                    print(f"\r[SETUP] Downloading PPE model... {pct:.1f}%", end="")
 
-except Exception as e:
-    print(f"[SETUP] Could not download PPE model: {e}")
-    print("[SETUP] The system will use color analysis as fallback")
-    # Do not abort build — detector.py has a fallback
+        print(f"\n[SETUP] ppe_detector.pt saved ({downloaded/1e6:.1f} MB)")
+
+    except Exception as e:
+        print(f"[SETUP] Could not download PPE model: {e}")
+        print("[SETUP] The system will use color analysis as fallback")
+        # Do not abort build — detector.py has a fallback
 
 print("\n[SETUP] Models ready for offline inference.")

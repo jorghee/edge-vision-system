@@ -32,7 +32,7 @@ bash "${PROJECT_ROOT}/scripts/setup_ekuiper.sh"
 echo "[4/5] Preparing detector environment..."
 if [ ! -d "${DETECTOR_DIR}/venv" ]; then
     echo "  Creating virtual environment..."
-    python3 -m venv "${DETECTOR_DIR}/venv"
+    python3 -m venv --system-site-packages "${DETECTOR_DIR}/venv"
     source "${DETECTOR_DIR}/venv/bin/activate"
     pip install -r "${DETECTOR_DIR}/requirements-rpi.txt"
 else
