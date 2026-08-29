@@ -20,42 +20,23 @@ El sistema implementa una arquitectura de microservicios comunicados asincrónam
 > [!NOTE]
 > La arquitectura completa y el flujo de datos están documentados en [docs/architecture.md](docs/architecture.md).
 
-## Estructura del Proyecto
+### Motor de reglas
+LF Edge eKuiper es un motor ligero de análisis de datos y procesamiento de flujos de IoT en el borde. Se trata de un servicio universal de computación en el borde o middleware diseñado para dispositivos o puertas de enlace en el borde con recursos limitados.
 
-```
-edge-vision-system/
-├── services/
-│   ├── detector/                 # Servicio de visión artificial
-│   │   ├── src/                  # detector.py, camera.py, health_monitor.py
-│   │   ├── scripts/              # download_model.py, export_model.py
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   └── requirements-rpi.txt
-│   └── action_service/           # Servicio de respuesta a alertas
-│       ├── src/                  # action_service.py
-│       ├── Dockerfile
-│       └── requirements.txt
-├── infrastructure/
-│   └── mqtt/config/              # mosquitto.conf
-├── scripts/                      # Automatización de despliegue
-│   ├── deploy.sh                 # Despliegue completo laptop → RPi
-│   ├── prepare_models.sh         # Descarga y exportación NCNN
-│   ├── start_laptop.sh           # Ejecución local (Docker completo)
-│   ├── start_rpi.sh              # Ejecución en RPi (híbrido)
-│   ├── run_rpi.sh                # Lanzamiento nativo del detector
-│   └── setup_ekuiper.sh          # Aprovisionamiento de reglas SQL
-├── docs/                         # Documentación técnica
-├── docker-compose.yml            # Orquestación x86_64
-└── docker-compose.rpi.yml        # Orquestación ARM64 (RPi)
-```
+eKuiper está escrito en Go. La arquitectura de eKuiper es la siguiente:
+
+![eKuiper architecture](./.github/assets/ekuiper_architecture.png) 
+
+> [!IMPORTANT]
+> Como motor de reglas, los usuarios pueden enviar trabajos (también conocidos como reglas) a través de la API REST o la CLI. El analizador de reglas/SQL de eKuiper o el analizador de reglas de grafos analizará, planificará y optimizará una regla para convertirla en un flujo de procesadores que aprovechan el tiempo de ejecución en streaming y el almacenamiento si es necesario.
 
 ## Despliegue en Raspberry Pi 4
 
 El proyecto está optimizado para Raspberry Pi 4 (OS Bookworm 64-bit) con cámara CSI. La estrategia es híbrida: la infraestructura opera en contenedores Docker y el módulo de inferencia corre nativamente para acceder a la cámara CSI vía Picamera2.
 
-### Despliegue automatizado (desde la laptop)
+### Despliegue automatizado
 
-El script `deploy.sh` automatiza todo el proceso: prepara los modelos NCNN en la laptop, sincroniza el código y los modelos en la RPi, instala dependencias y levanta el sistema.
+El script `deploy.sh` automatiza todo el proceso: prepara los modelos NCNN en el host, sincroniza el código y los modelos en la RPi, instala dependencias y levanta el sistema.
 
 ```bash
 bash scripts/deploy.sh
@@ -65,11 +46,11 @@ El script solicita interactivamente el usuario y la IP de la Raspberry Pi, y eje
 
 | Paso | Acción | Equipo |
 | :--- | :--- | :--- |
-| 1 | Descarga modelos YOLOv8 y exporta a NCNN | Laptop |
-| 2 | Push de commits al remoto | Laptop |
+| 1 | Descarga modelos YOLOv8 y exporta a NCNN | Host |
+| 2 | Push de commits al remoto | Host |
 | 3 | Instalación de Git, Docker, picamera2, libcamera | RPi (SSH) |
 | 4 | Clone/pull del repositorio | RPi (SSH) |
-| 5 | Transferencia de modelos NCNN | Laptop → RPi |
+| 5 | Transferencia de modelos NCNN | Host a RPi |
 | 6 | Levantamiento del sistema completo | RPi (SSH) |
 
 > [!TIP]
@@ -94,9 +75,9 @@ docker exec mqtt-broker mosquitto_sub -t "edge/alerts" -v       # alertas filtra
 | Capacidad | Descripción |
 | :--- | :--- |
 | **Detección de personas** | Inferencia YOLOv8 en tiempo real sobre frames capturados. |
-| **Análisis de EPP** | Modelo fine-tuned (casco) + fallback HSV (chaleco). |
+| **Análisis de EPP** | Modelo fine-tuned (casco) y fallback HSV (chaleco). |
 | **Abstracción de cámara** | Factory pattern: OpenCV (USB) y Picamera2 (CSI). |
-| **Aceleración ARM** | Exportación PyTorch → NCNN con instrucciones NEON SIMD. |
+| **Aceleración ARM** | Exportación PyTorch a NCNN con instrucciones NEON SIMD. |
 | **Telemetría IoT** | Monitoreo de CPU, RAM, temperatura y throttling en RPi. |
 | **Filtrado en el borde** | Reglas SQL en eKuiper eliminan ruido antes de alertar. |
 
