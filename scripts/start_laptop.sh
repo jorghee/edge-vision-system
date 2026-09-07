@@ -1,6 +1,6 @@
 #!/bin/bash
 # Launches the full Edge Vision System locally (laptop with USB webcam).
-# All services run inside Docker, including the detector.
+# All services run inside Docker. eKuiper captures video directly.
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ bash "${PROJECT_ROOT}/scripts/setup_ekuiper.sh"
 
 echo ""
 echo "System is running. Useful commands:"
-echo "  docker ps                                              # check containers"
-echo "  docker exec mqtt-broker mosquitto_sub -t 'camera/events' -v   # raw events"
-echo "  docker exec mqtt-broker mosquitto_sub -t 'edge/alerts' -v     # filtered alerts"
-echo "  docker compose down                                    # stop all"
+echo "  docker ps                                                    # check containers"
+echo "  docker exec mqtt-broker mosquitto_sub -t 'edge/alerts' -v    # alerts"
+echo "  docker exec mqtt-broker mosquitto_sub -t 'edge/monitor' -v   # all events"
+echo "  docker compose down                                          # stop all"

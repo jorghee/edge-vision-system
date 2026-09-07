@@ -1,7 +1,8 @@
 version: "3.8"
 
-# The detector runs natively (outside Docker) for direct access to the CSI
-# camera via Picamera2. Only infrastructure services run in Docker.
+# eKuiper-native architecture: eKuiper captures video directly,
+# runs inference via Portable Plugin, and publishes alerts to MQTT.
+# The standalone Python detector is no longer used.
 
 networks:
   edge-net:
@@ -27,18 +28,27 @@ services:
     networks:
       - edge-net
 
-  # slim instead of alpine for ARM64 compatibility
   ekuiper:
     image: lfedge/ekuiper:1.13-slim
     container_name: ekuiper-engine
     restart: unless-stopped
+    privileged: true
     ports:
       - "9081:9081"
     environment:
       MQTT_SOURCE__DEFAULT__SERVER: "tcp://mqtt:1883"
+      KUIPER__PORTABLE__PYTHON_BIN: "python3"
+      MODELS_DIR: "/kuiper/models"
+      CAMERA_ID: "cam-rpi-01"
+      CONFIDENCE_THR: "0.45"
+    devices:
+      - "/dev/video0:/dev/video0"
     volumes:
       - ekuiper-data:/kuiper/data
       - ekuiper-log:/kuiper/log
+      - ./services/ekuiper/plugins/ppe_inference:/kuiper/plugins/portables/ppe_inference
+      - ./services/detector/models:/kuiper/models
+      - ./infrastructure/ekuiper/sources/video.yaml:/kuiper/etc/sources/video.yaml
     depends_on:
       - mqtt
     networks:

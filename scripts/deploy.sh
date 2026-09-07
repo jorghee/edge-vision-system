@@ -1,5 +1,6 @@
 #!/bin/bash
 # Automates the deployment of the Edge Vision System to a Raspberry Pi.
+# eKuiper-native architecture: all services run in Docker on the RPi.
 
 set -euo pipefail
 
@@ -14,13 +15,13 @@ echo "[INFO] The Raspberry Pi must be powered on with SSH enabled."
 echo "========================================================="
 echo ""
 
-# Prepare models locally
-echo "[1/7] Preparing models locally..."
+# Prepare models locally (TFLite + NCNN)
+echo "[1/6] Preparing models locally..."
 bash "${SCRIPT_DIR}/prepare_models.sh"
 
 # Push local commits so the RPi can clone the latest code
 echo ""
-echo "[2/7] Pushing local commits to remote..."
+echo "[2/6] Pushing local commits to remote..."
 if ! git -C "${PROJECT_ROOT}" diff --quiet HEAD 2>/dev/null; then
     echo "[WARN] You have uncommitted changes. They will NOT be available on the RPi."
 fi
@@ -31,7 +32,7 @@ git -C "${PROJECT_ROOT}" push || {
 
 # Prompt for RPi credentials
 echo ""
-echo "[3/7] SSH Connection Details"
+echo "[3/6] SSH Connection Details"
 read -rp "Raspberry Pi username [pi]: " RPI_USER
 RPI_USER="${RPI_USER:-pi}"
 read -rp "Raspberry Pi IP address: " RPI_IP
@@ -43,27 +44,25 @@ fi
 
 # Verify connectivity
 echo ""
-echo "[4/7] Verifying connectivity to ${RPI_USER}@${RPI_IP}..."
+echo "[4/6] Verifying connectivity to ${RPI_USER}@${RPI_IP}..."
 if ! ping -c 1 -W 3 "${RPI_IP}" >/dev/null 2>&1; then
     echo "[ERROR] Host ${RPI_IP} is unreachable. Check your network."
     exit 1
 fi
 echo "[OK] Host reachable."
-echo "[INFO] You will be prompted for the SSH password during the following steps."
-echo "[INFO] To avoid repeated prompts, set up SSH keys: ssh-copy-id ${RPI_USER}@${RPI_IP}"
+echo "[INFO] To avoid repeated SSH prompts: ssh-copy-id ${RPI_USER}@${RPI_IP}"
 
-# Install system dependencies on RPi
+# Install system dependencies on RPi (only Docker and Git needed now)
 echo ""
-echo "[5/7] Installing system dependencies on Raspberry Pi..."
+echo "[5/6] Installing system dependencies on Raspberry Pi..."
 ssh -t "${RPI_USER}@${RPI_IP}" << 'REMOTE_DEPS'
     set -euo pipefail
 
     echo "  Updating package lists..."
     sudo apt-get update -qq
 
-    echo "  Installing Git, Python and camera packages..."
-    sudo apt-get install -y -qq git python3-venv python3-pip \
-        python3-picamera2 python3-libcamera curl
+    echo "  Installing Git and curl..."
+    sudo apt-get install -y -qq git curl
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "  Installing Docker..."
@@ -73,18 +72,12 @@ ssh -t "${RPI_USER}@${RPI_IP}" << 'REMOTE_DEPS'
     else
         echo "  Docker is already installed."
     fi
-
-    # Ensure current user can run docker without sudo in this session
-    if ! groups | grep -q docker; then
-        echo "[WARN] Docker group not active in current session. Using sudo for docker commands."
-    fi
 REMOTE_DEPS
 
 # Clone or update repository, then transfer models
 echo ""
-echo "[6/7] Syncing repository and transferring models..."
+echo "[6/6] Syncing repository and transferring models..."
 
-# Convert SSH URL to HTTPS so the RPi can clone without SSH keys
 REPO_URL=$(git -C "${PROJECT_ROOT}" config --get remote.origin.url || echo "")
 if [ -z "${REPO_URL}" ]; then
     echo "[ERROR] Could not determine Git remote URL."
@@ -110,13 +103,12 @@ MODELS_DIR="${PROJECT_ROOT}/services/detector/models"
 RPI_MODELS_DIR="${RPI_PROJECT_DIR}/services/detector/models"
 
 ssh "${RPI_USER}@${RPI_IP}" "mkdir -p '${RPI_MODELS_DIR}'"
-echo "  Transferring NCNN models..."
+echo "  Transferring models (TFLite + NCNN)..."
 scp -r "${MODELS_DIR}/"* "${RPI_USER}@${RPI_IP}:${RPI_MODELS_DIR}/"
 
 # Start the system on RPi
 echo ""
-echo "[7/7] Starting Edge Vision System on Raspberry Pi..."
-# Use sg to run with docker group if it was just added in this session
+echo "[OK] Starting Edge Vision System on Raspberry Pi..."
 ssh -t "${RPI_USER}@${RPI_IP}" "
     cd '${RPI_PROJECT_DIR}'
     if groups | grep -q docker; then

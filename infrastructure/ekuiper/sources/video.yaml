@@ -1,0 +1,13 @@
+# eKuiper Video Source configuration.
+# Captures frames from a local camera device.
+# See: https://ekuiper.org/docs/en/latest/guide/sources/plugin/video.html
+
+default:
+  url: /dev/video0
+  interval: 3000
+  codec: mjpeg
+
+camera_csi:
+  url: /dev/video0
+  interval: 5000
+  codec: mjpeg

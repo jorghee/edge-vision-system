@@ -1,76 +1,92 @@
 # Architecture and Data Flow
 
-The Edge Vision System follows an event-driven microservices paradigm using MQTT as the central message bus. This decoupled architecture allows independent scaling and deployment in different topologies (single device or distributed).
+The Edge Vision System uses an **eKuiper-native architecture** where the rules engine is the primary actor. eKuiper captures video frames directly from the camera, runs AI inference through a Portable Python Plugin, and publishes only filtered alerts to MQTT.
 
 ## Architecture Diagram
 
 ```mermaid
 graph TD
-    CAM["Camera<br/>(USB / CSI)"] -->|Frames| DET["Detector<br/>(YOLOv8 + PPE Analysis)"]
+    subgraph "Edge Device (Raspberry Pi 4 / Laptop)"
+        CAM["/dev/video0<br/>(USB / CSI Camera)"] -.->|"V4L2 device"| VS
 
-    subgraph Edge Device
-        DET -->|"MQTT: camera/events"| MQTT["MQTT Broker<br/>(Mosquitto)"]
-        MQTT <-->|"Streams & Rules"| EK["eKuiper<br/>(Rules Engine)"]
-        MQTT -->|"MQTT: edge/alerts"| ACT["Action Service<br/>(Response)"]
-        ACT -->|"MQTT: edge/actions"| MQTT
-        HM["Health Monitor<br/>(Telemetry)"] -->|"MQTT: edge/health"| MQTT
+        subgraph eKuiper["eKuiper Engine"]
+            VS["Video Source Plugin<br/>(frame capture via ffmpeg)"]
+            PP["Portable Python Plugin<br/>(ppeInference)"]
+            SQL["SQL Rules Engine"]
+
+            VS -->|"binary frames"| PP
+            PP -->|"JSON detections"| SQL
+        end
+
+        SQL -->|"MQTT Sink<br/>(edge/alerts)"| MQTT["Mosquitto"]
+        SQL -->|"MQTT Sink<br/>(edge/monitor)"| MQTT
+        MQTT --> ACT["Action Service"]
+        ACT -->|"edge/actions"| MQTT
+
+        HM["Health Monitor"] -->|"edge/health"| MQTT
     end
 ```
 
-## Communication Flow
+## Data Flow
 
-The processing pipeline from image capture to structured alert emission:
+### 1. Frame Capture (eKuiper Video Source)
 
-### 1. Capture and Detection (`services/detector/src/detector.py`)
+eKuiper's [Video Source Plugin](https://ekuiper.org/docs/en/latest/guide/sources/plugin/video.html) captures frames from the local camera device at a configurable interval (default: 3 seconds). The plugin uses ffmpeg internally and produces binary frame data.
 
-The detector captures images periodically (controlled by `INTERVAL_SEC`), runs YOLOv8 inference to identify people, and performs PPE analysis (helmet and vest) on each detected person. Results are packaged into a standardized JSON payload including telemetry data and a `severity` level (`critical`, `high`, `none`), then published to the MQTT topic `camera/events`.
+Configuration: [`infrastructure/ekuiper/sources/video.yaml`](file:///home/george/George/I_programmer/Projects/edge-vision-system/infrastructure/ekuiper/sources/video.yaml)
 
-### 2. Rule Processing (`ekuiper`)
+### 2. AI Inference (Portable Python Plugin)
 
-eKuiper subscribes to `camera/events` and treats incoming data as a continuous stream. The engine evaluates each event against SQL rules. For example, events where `severity = 'critical'` or `severity = 'high'` are republished to `edge/alerts`. Monitoring events are sent to `edge/monitor`.
+The `ppeInference` function ([`services/ekuiper/plugins/ppe_inference/ppe_func.py`](file:///home/george/George/I_programmer/Projects/edge-vision-system/services/ekuiper/plugins/ppe_inference/ppe_func.py)) receives raw frame bytes and executes:
 
-Rules are provisioned automatically by `scripts/setup_ekuiper.sh`:
+| Step | Operation | Output |
+|:---|:---|:---|
+| Person detection | YOLOv8 (class 0 only) | Bounding boxes |
+| Per-person crop | Frame slicing | Person images |
+| Helmet check | PPE model or HSV fallback | detected, confidence |
+| Vest check | HSV color segmentation | detected, confidence |
+| Severity classification | Logic rules | event_type, severity |
 
-| Rule | SQL Condition | Output Topic |
-| :--- | :--- | :--- |
-| `alert_critical` | `severity = 'critical'` | `edge/alerts` |
-| `alert_high` | `severity = 'high'` | `edge/alerts` |
-| `monitor_all` | `event_type != 'clear'` | `edge/monitor` |
+The plugin returns a list of detection results (JSON) per frame.
 
-### 3. Action Execution (`services/action_service/src/action_service.py`)
+### 3. SQL Filtering (eKuiper Rules)
 
-The action service listens on `edge/alerts`. Upon receiving a validated alert, it processes the payload, logs the severity, and publishes response recommendations to `edge/actions`.
+eKuiper rules filter the detections and route them:
+
+| Rule | Condition | Output Topic |
+|:---|:---|:---|
+| `ppe_alert_critical` | `severity = 'critical'` | `edge/alerts` |
+| `ppe_alert_high` | `severity = 'high'` | `edge/alerts` |
+| `ppe_monitor` | `event_type != 'clear'` | `edge/monitor` |
+
+### 4. Action Execution (Action Service)
+
+The action service subscribes to `edge/alerts`, logs the alert, and publishes response recommendations to `edge/actions`.
 
 ## MQTT Topic Map
 
 | Topic | Publisher | Subscriber | Payload |
-| :--- | :--- | :--- | :--- |
-| `camera/events` | Detector | eKuiper | Full detection results (JSON) |
-| `edge/alerts` | eKuiper | Action Service | Filtered critical/high alerts |
+|:---|:---|:---|:---|
+| `edge/alerts` | eKuiper (sink) | Action Service | Filtered critical/high alerts (JSON) |
 | `edge/actions` | Action Service | External systems | Response recommendations |
-| `edge/monitor` | eKuiper | Dashboards | All non-clear events |
+| `edge/monitor` | eKuiper (sink) | Dashboards | All non-clear events |
 | `edge/health` | Health Monitor | eKuiper / Dashboards | CPU, RAM, temperature |
 
-## Role of eKuiper
+## Key Design Decision: Why eKuiper-Native?
 
-eKuiper acts as the real-time analytical core. Its primary role is **preventing ecosystem saturation**. In a real IoT/Edge environment, continuously transmitting events from every analyzed frame — even when safety conditions are normal — would waste network bandwidth and central processing resources.
-
-By placing eKuiper directly on the local device, filtering is delegated to the source:
-
-| Function | Benefit |
-| :--- | :--- |
-| **Noise filtering** | Transforms raw detection JSON into actionable intelligence (critical alerts only). |
-| **Logic decoupling** | Alert thresholds are defined via declarative SQL, avoiding hardcoded conditions in Python scripts. |
-| **Edge autonomy** | The device operates independently; cloud connectivity is only needed for critical alerts. |
+| Aspect | Previous (Python Detector) | Current (eKuiper-Native) |
+|:---|:---|:---|
+| Camera access | Python holds device exclusively | eKuiper Video Source (inside Docker) |
+| Inference runtime | Python + PyTorch/NCNN (~400 MB RAM) | Portable Plugin (shared eKuiper process) |
+| MQTT load | Every event published to broker | Only filtered alerts reach MQTT |
+| Serialization | JSON encode → TCP → decode per frame | In-memory data between plugin and SQL |
+| Docker consistency | Detector runs natively (outside Docker) | All services containerized |
 
 ## Deployment Model
 
 | Component | Laptop (x86_64) | Raspberry Pi (ARM64) |
-| :--- | :--- | :--- |
+|:---|:---|:---|
 | MQTT Broker | Docker container | Docker container |
-| eKuiper | Docker container | Docker container |
+| eKuiper + Plugin | Docker container (privileged) | Docker container (privileged) |
 | Action Service | Docker container | Docker container |
-| Detector | Docker container | **Native** (Picamera2 access) |
-| Health Monitor | N/A | **Native** (hardware telemetry) |
-
-The hybrid deployment on RPi is necessary because CSI cameras require native `libcamera` access, which is not easily passed through to Docker containers.
+| Health Monitor | Optional | Native sidecar |

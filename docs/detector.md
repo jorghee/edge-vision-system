@@ -1,64 +1,82 @@
 # Detection System
 
-The core of the computer vision pipeline resides in the detector module (`services/detector/src/`). Its primary responsibility is processing raw images, identifying people in the scene, and evaluating Personal Protective Equipment (PPE) compliance.
+The vision intelligence resides in the eKuiper Portable Python Plugin (`services/ekuiper/plugins/ppe_inference/ppe_func.py`). This plugin replaces the standalone `detector.py` service and runs inside eKuiper's pipeline.
 
-## Camera Abstraction
+## Pipeline Overview
 
-The module `services/detector/src/camera.py` provides a unified interface (`Camera` protocol) supported by two backends:
+```
+Video Source → ppeInference(frame) → SQL Rules → MQTT Sink
+```
 
-| Backend | Class | Use Case | Library |
-| :--- | :--- | :--- | :--- |
-| **OpenCV** | `OpenCVCamera` | USB webcams on x86_64 (laptops/servers) | `cv2.VideoCapture` |
-| **Picamera2** | `PiCamera` | CSI cameras on Raspberry Pi | `picamera2` + `libcamera` |
+The plugin receives binary frame data from eKuiper's Video Source, performs all detection and classification, and returns structured JSON results that eKuiper's SQL engine can filter.
 
-Backend selection is controlled by the `CAMERA_BACKEND` environment variable (`"opencv"`, `"picamera2"`, or `"auto"`). In `auto` mode, the factory attempts Picamera2 first and falls back to OpenCV.
+## Person Detection (YOLOv8)
 
-## Base Detection (People)
+Each frame is processed with YOLOv8 nano (`yolov8n`), filtering exclusively for COCO class 0 (Person). The model is loaded in TFLite format for eKuiper compatibility, with automatic fallback to ONNX or PT.
 
-Each frame is processed with **YOLOv8** (typically the `yolov8n` nano variant). The network is pre-trained on COCO, providing high-accuracy detection. The detector filters exclusively for class `0` (Person), ignoring all other classes.
+| Format | Priority | Use Case |
+|:---|:---|:---|
+| TFLite | Primary | eKuiper native AI functions |
+| ONNX | Secondary | Universal compatibility |
+| PT (PyTorch) | Fallback | Development/testing |
 
-On Raspberry Pi, models are exported to **NCNN** format for optimized ARM inference using NEON SIMD instructions. The export is handled by `services/detector/scripts/export_model.py`.
+Model search paths are configured via the `MODELS_DIR` environment variable (default: `/kuiper/models`).
 
 ## PPE Detection (Helmets and Vests)
 
-Once people are located (bounding boxes), the detector crops each region and applies two concurrent strategies:
+Once people are located (bounding boxes), the plugin crops each person region and applies two concurrent strategies:
 
-### Primary: Fine-Tuned Model
+### Primary: Fine-Tuned Model (Helmet)
 
-If a specialized model (`ppe_detector.pt` or its NCNN equivalent) is available, the system runs inference directly on the person crop. This model (`keremberke/yolov8n-hard-hat-detection`) is trained specifically for hard hat detection and provides robust results across varying lighting conditions.
+If `ppe_detector.tflite` (or `.onnx`/`.pt`) is available, the plugin runs inference on the person crop. This model (`keremberke/yolov8n-hard-hat-detection`) detects:
+
+| Class ID | Label |
+|:---|:---|
+| 0 | Helmet detected |
+| 1 | Head without helmet |
+
+When neither head nor helmet is detected (person facing away), the plugin assumes compliance to avoid false positives.
 
 ### Fallback: HSV Color Analysis
 
-When the PPE model is unavailable, or for vest detection (which the fine-tuned model does not cover), a classical color segmentation approach is applied:
+When the PPE model is unavailable, or for vest detection (which the fine-tuned model does not cover), HSV color segmentation is applied:
 
 | Step | Detail |
-| :--- | :--- |
-| Region splitting | The person crop is divided geometrically: upper third (head), middle section (torso). |
-| Color space | The region is converted from BGR to HSV (Hue, Saturation, Value). |
-| Mask evaluation | Pixel density is measured against masks for typical PPE colors (yellow, orange, red, white). |
-| Threshold | If the target color density exceeds a preset threshold in the area of interest, the item is marked as "detected". |
+|:---|:---|
+| Region splitting | Upper 30% (head) for helmet, middle 30-70% (torso) for vest |
+| Color space | BGR → HSV conversion |
+| Mask evaluation | Pixel density against yellow, orange, white, red masks |
+| Threshold | Helmet: >8% density, Vest: >12% density |
 
-## Severity Evaluation
-
-Based on helmet and vest presence, the system assigns a classification:
+## Severity Classification
 
 | Severity | Event Type | Condition |
-| :--- | :--- | :--- |
-| `none` | `ppe_compliant` | Both helmet and vest detected. |
-| `high` | `no_helmet` / `no_vest` | Partial PPE absence. |
-| `critical` | `no_helmet_no_vest` | Both items missing. |
-| `info` | `clear` | No person detected in the frame. |
+|:---|:---|:---|
+| `critical` | `no_helmet_no_vest` | Both items missing |
+| `high` | `no_helmet` / `no_vest` | Partial PPE absence |
+| `none` | `ppe_compliant` | Both detected |
+| `none` | `clear` | No person in frame |
 
 ## Health Monitor
 
-The module `services/detector/src/health_monitor.py` is a companion process that extracts hardware telemetry. It publishes to `edge/health` every 30 seconds:
+The module `services/detector/src/health_monitor.py` runs as a companion process publishing to `edge/health` every 30 seconds:
 
 | Metric | Source |
-| :--- | :--- |
+|:---|:---|
 | CPU temperature (°C) | `/sys/class/thermal/` |
 | CPU usage (%) | Load average |
 | RAM (total, used, %) | `/proc/meminfo` |
 | Disk usage | Root partition |
 | SoC throttling state | `vcgencmd get_throttled` |
 
-This telemetry can be consumed by eKuiper rules to prevent thermal damage and manage device availability autonomously.
+## Plugin Architecture
+
+The Portable Plugin communicates with eKuiper via nanomsg (IPC). It runs as an independent Python process managed by eKuiper's plugin lifecycle:
+
+| File | Purpose |
+|:---|:---|
+| `ppe_func.py` | Inference logic + `PpeInference` class implementing `Function` interface |
+| `ppe_inference.json` | Plugin metadata (entry point, function names) |
+| `requirements.txt` | Python dependencies (ultralytics, opencv, numpy) |
+
+The plugin lazy-loads models on the first inference call to minimize startup time.

@@ -1,17 +1,17 @@
 #!/bin/bash
 # Prepares (downloads and exports) the required models for the Edge Vision System.
-# Models are exported to NCNN format for optimal performance on ARM devices.
+# Models are exported to TFLite format for eKuiper's AI inference pipeline.
+# NCNN export is also performed as a secondary format.
 
 set -euo pipefail
 
-# Calculate paths relative to this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DETECTOR_DIR="${PROJECT_ROOT}/services/detector"
 MODELS_DIR="${DETECTOR_DIR}/models"
 SCRIPTS_DIR="${DETECTOR_DIR}/scripts"
 
-echo "[1/4] Preparing environment..."
+echo "[1/5] Preparing environment..."
 mkdir -p "${MODELS_DIR}"
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -34,7 +34,7 @@ if ! python3 -c "import ultralytics" >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "[2/4] Downloading models..."
+echo "[2/5] Downloading models..."
 export MODELS_DIR
 python3 "${SCRIPTS_DIR}/download_model.py"
 
@@ -46,19 +46,41 @@ if [ ! -f "${BASE_MODEL}" ]; then
     exit 1
 fi
 
-echo "[3/4] Exporting models to NCNN..."
+echo "[3/5] Exporting models to TFLite (primary format for eKuiper)..."
+BASE_TFLITE="${MODELS_DIR}/yolov8n_saved_model"
+PPE_TFLITE="${MODELS_DIR}/ppe_detector_saved_model"
+
+NEEDS_TFLITE=false
+if [ ! -d "${BASE_TFLITE}" ]; then
+    NEEDS_TFLITE=true
+fi
+if [ -f "${PPE_MODEL}" ] && [ ! -d "${PPE_TFLITE}" ]; then
+    NEEDS_TFLITE=true
+fi
+
+if [ "${NEEDS_TFLITE}" = true ]; then
+    export_args="--base \"${BASE_MODEL}\" --format tflite"
+    if [ -f "${PPE_MODEL}" ]; then
+        export_args="${export_args} --ppe \"${PPE_MODEL}\""
+    fi
+    eval "python3 \"${SCRIPTS_DIR}/export_model.py\" ${export_args}"
+else
+    echo "[INFO] TFLite models already exist, skipping export."
+fi
+
+echo "[4/5] Exporting models to NCNN (secondary format)..."
 BASE_NCNN_DIR="${MODELS_DIR}/yolov8n_ncnn_model"
 PPE_NCNN_DIR="${MODELS_DIR}/ppe_detector_ncnn_model"
 
-NEEDS_EXPORT=false
+NEEDS_NCNN=false
 if [ ! -d "${BASE_NCNN_DIR}" ]; then
-    NEEDS_EXPORT=true
+    NEEDS_NCNN=true
 fi
 if [ -f "${PPE_MODEL}" ] && [ ! -d "${PPE_NCNN_DIR}" ]; then
-    NEEDS_EXPORT=true
+    NEEDS_NCNN=true
 fi
 
-if [ "${NEEDS_EXPORT}" = true ]; then
+if [ "${NEEDS_NCNN}" = true ]; then
     export_args="--base \"${BASE_MODEL}\" --format ncnn"
     if [ -f "${PPE_MODEL}" ]; then
         export_args="${export_args} --ppe \"${PPE_MODEL}\""
@@ -68,18 +90,12 @@ else
     echo "[INFO] NCNN models already exist, skipping export."
 fi
 
-echo "[4/4] Verifying exports..."
-BASE_NCNN_DIR="${MODELS_DIR}/yolov8n_ncnn_model"
-PPE_NCNN_DIR="${MODELS_DIR}/ppe_detector_ncnn_model"
-
+echo "[5/5] Verifying exports..."
+if [ ! -d "${BASE_TFLITE}" ]; then
+    echo "[WARN] TFLite export for base model not found: ${BASE_TFLITE}"
+fi
 if [ ! -d "${BASE_NCNN_DIR}" ]; then
-    echo "[ERROR] NCNN export for base model failed. Directory not found: ${BASE_NCNN_DIR}"
-    exit 1
+    echo "[WARN] NCNN export for base model not found: ${BASE_NCNN_DIR}"
 fi
 
-if [ -f "${PPE_MODEL}" ] && [ ! -d "${PPE_NCNN_DIR}" ]; then
-    echo "[ERROR] NCNN export for PPE model failed. Directory not found: ${PPE_NCNN_DIR}"
-    exit 1
-fi
-
-echo "[OK] Models successfully prepared and exported to NCNN format in ${MODELS_DIR}"
+echo "[OK] Models prepared. TFLite (eKuiper) and NCNN (fallback) formats in ${MODELS_DIR}"

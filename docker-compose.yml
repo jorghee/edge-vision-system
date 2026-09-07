@@ -1,5 +1,8 @@
 version: "3.8"
 
+# Laptop deployment: all services in Docker, including eKuiper with
+# Video Source capturing from USB webcam. No standalone detector.
+
 networks:
   edge-net:
     driver: bridge
@@ -28,41 +31,27 @@ services:
     image: lfedge/ekuiper:1.13-alpine
     container_name: ekuiper-engine
     restart: unless-stopped
+    privileged: true
     ports:
       - "9081:9081"
     environment:
       MQTT_SOURCE__DEFAULT__SERVER: "tcp://mqtt:1883"
+      KUIPER__PORTABLE__PYTHON_BIN: "python3"
+      MODELS_DIR: "/kuiper/models"
+      CAMERA_ID: "cam-01"
+      CONFIDENCE_THR: "0.45"
+    devices:
+      - "/dev/video2:/dev/video2"
     volumes:
       - ekuiper-data:/kuiper/data
       - ekuiper-log:/kuiper/log
+      - ./services/ekuiper/plugins/ppe_inference:/kuiper/plugins/portables/ppe_inference
+      - ./services/detector/models:/kuiper/models
+      - ./infrastructure/ekuiper/sources/video.yaml:/kuiper/etc/sources/video.yaml
     depends_on:
       - mqtt
     networks:
       - edge-net
-
-  detector:
-    build: ./services/detector
-    container_name: edge-detector
-    restart: unless-stopped
-    environment:
-      MQTT_BROKER: mqtt
-      MQTT_PORT: "1883"
-      MQTT_TOPIC: camera/events
-      CAMERA_ID: cam-01
-      CAMERA_INDEX: "2"
-      CAMERA_BACKEND: "opencv"
-      INTERVAL_SEC: "3"
-      USE_SIMULATION: "false"
-      MODEL_PATH: "/app/models/yolov8n.pt"
-      CONFIDENCE_THR: "0.45"
-      CAPTURE_WIDTH: "640"
-      CAPTURE_HEIGHT: "480"
-    depends_on:
-      - mqtt
-    networks:
-      - edge-net
-    devices:
-      - /dev/video2:/dev/video2
 
   action_service:
     build: ./services/action_service

@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "language": "python",
+  "executable": "ppe_func.py",
+  "functions": ["ppeInference"],
+  "sources": [],
+  "sinks": []
+}
