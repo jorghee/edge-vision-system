@@ -34,8 +34,8 @@ services:
       MQTT_USER_ACTION: "${MQTT_USER_ACTION:-action_service}"
       MQTT_PASS_ACTION: "${MQTT_PASS_ACTION:-SecureAction2026!}"
     volumes:
-      - ./infrastructure/mqtt/server-config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - ./infrastructure/mqtt/server-config/entrypoint.sh:/entrypoint.sh
+      - ./infrastructure/mqtt/server-config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infrastructure/mqtt/server-config/entrypoint.sh:/entrypoint.sh:ro
       - mosquitto-data:/mosquitto/data
     entrypoint: /entrypoint.sh
     networks:
