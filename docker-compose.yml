@@ -28,7 +28,7 @@ services:
       - edge-net
 
   ekuiper:
-    image: lfedge/ekuiper:1.13-alpine
+    build: ./services/ekuiper
     container_name: ekuiper-engine
     restart: unless-stopped
     privileged: true
