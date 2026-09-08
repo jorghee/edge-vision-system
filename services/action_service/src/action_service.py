@@ -67,8 +67,7 @@ def get_recommendation(event_type: str) -> str:
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        log.info(f"[SUCCESS] Connected to MQTT broker at {
-                 MQTT_BROKER}:{MQTT_PORT}")
+        log.info(f"[SUCCESS] Connected to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}")
         # Subscribe to alerts topic
         client.subscribe(ALERT_TOPIC, qos=1)
         log.info(f"[LISTEN] Listening for alerts on '{ALERT_TOPIC}'")
