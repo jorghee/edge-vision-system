@@ -2,9 +2,9 @@ FROM lfedge/ekuiper:1.13-slim-python
 
 USER root
 
-# Install dependencies required by OpenCV and Python packages
+# libglib2.0-0 is needed by opencv-python-headless at runtime.
+# libgl1 is NOT needed because we use the headless variant of OpenCV.
 RUN apt-get -o Acquire::Check-Valid-Until=false update && apt-get install -y \
-    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
