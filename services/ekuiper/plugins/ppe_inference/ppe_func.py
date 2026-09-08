@@ -35,10 +35,12 @@ except ImportError:
         def validate(self, args): return ""
         def exec(self, args, ctx): return None
         def is_aggregate(self): return False
+
     class Source:
         def configure(self, datasource, conf): pass
         def open(self, ctx): pass
         def close(self, ctx): pass
+
     class Context:
         pass
 
@@ -76,10 +78,7 @@ def _get_np():
     return _np
 
 
-# ---------------------------------------------------------------------------
 # Portable Source: Camera Capture
-# ---------------------------------------------------------------------------
-
 class CameraSource(Source):
     """Captures frames from /dev/video0 and pushes them into eKuiper."""
 
@@ -105,20 +104,25 @@ class CameraSource(Source):
         log.info("Camera opened: device=%s", self.device)
 
         while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                log.warning("Failed to read frame, retrying...")
-                time.sleep(1)
-                continue
+            try:
+                ret, frame = self.cap.read()
+                if not ret:
+                    log.warning("Failed to read frame, retrying...")
+                    time.sleep(1)
+                    continue
 
-            # Encode frame as JPEG bytes, then base64 for transport
-            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            b64_frame = base64.b64encode(buf.tobytes()).decode("ascii")
+                # Encode frame as JPEG bytes, then base64 for transport
+                _, buf = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                b64_frame = base64.b64encode(buf.tobytes()).decode("ascii")
 
-            ctx.emit({"frame": b64_frame, "camera_id": CAMERA_ID,
-                       "timestamp": datetime.utcnow().isoformat() + "Z"})
+                ctx.emit({"frame": b64_frame, "camera_id": CAMERA_ID,
+                          "timestamp": datetime.utcnow().isoformat() + "Z"}, {})
 
-            time.sleep(self.interval)
+                time.sleep(self.interval)
+            except Exception as e:
+                log.error("Error in CameraSource loop: %s", e)
+                time.sleep(self.interval)
 
     def close(self, ctx: Context):
         if self.cap and self.cap.isOpened():
@@ -126,10 +130,7 @@ class CameraSource(Source):
             log.info("Camera released")
 
 
-# ---------------------------------------------------------------------------
 # AI Model Loading (lazy)
-# ---------------------------------------------------------------------------
-
 def _load_models():
     global _models
     if _models is not None:
@@ -141,13 +142,15 @@ def _load_models():
     logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
     base_candidates = [
-        os.path.join(MODELS_DIR, "yolov8n_saved_model", "yolov8n_float32.tflite"),
+        os.path.join(MODELS_DIR, "yolov8n_saved_model",
+                     "yolov8n_float32.tflite"),
         os.path.join(MODELS_DIR, "yolov8n.tflite"),
         os.path.join(MODELS_DIR, "yolov8n.onnx"),
         os.path.join(MODELS_DIR, "yolov8n.pt"),
     ]
     ppe_candidates = [
-        os.path.join(MODELS_DIR, "ppe_detector_saved_model", "ppe_detector_float32.tflite"),
+        os.path.join(MODELS_DIR, "ppe_detector_saved_model",
+                     "ppe_detector_float32.tflite"),
         os.path.join(MODELS_DIR, "ppe_detector.tflite"),
         os.path.join(MODELS_DIR, "ppe_detector.onnx"),
         os.path.join(MODELS_DIR, "ppe_detector.pt"),
@@ -175,10 +178,7 @@ def _load_models():
     return _models
 
 
-# ---------------------------------------------------------------------------
 # PPE Detection Helpers
-# ---------------------------------------------------------------------------
-
 def _detect_persons(frame, models):
     """Run YOLOv8 on full frame, return person bounding boxes."""
     results = models["base"](
@@ -337,10 +337,7 @@ def process_frame(frame_bytes):
     return detections
 
 
-# ---------------------------------------------------------------------------
 # Portable Function: PPE Inference
-# ---------------------------------------------------------------------------
-
 class PpeInference(Function):
     """eKuiper Portable Plugin function.
 
@@ -369,10 +366,7 @@ class PpeInference(Function):
         return False
 
 
-# ---------------------------------------------------------------------------
 # Plugin entry point
-# ---------------------------------------------------------------------------
-
 if __name__ == '__main__':
     from ekuiper.runtime.plugin import PluginConfig, start
     c = PluginConfig(
