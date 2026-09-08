@@ -7,14 +7,15 @@ and returns structured detection results.
 
 This replaces the standalone detector.py service. All inference
 logic runs inside eKuiper's pipeline via the Portable Plugin SDK.
+
+IMPORTANT: All heavy imports (cv2, numpy, ultralytics) are deferred
+to first use. The module-level code must be fast (<1s) so that the
+eKuiper IPC handshake completes before the timeout.
 """
 
 import os
 import logging
 from datetime import datetime
-
-import cv2
-import numpy as np
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,7 +26,6 @@ log = logging.getLogger(__name__)
 try:
     from ekuiper import Function, Context
 except ImportError:
-    # Allow local testing without eKuiper SDK
     class Function:
         def validate(self, args): return ""
         def exec(self, args, ctx): return None
@@ -37,8 +37,32 @@ MODELS_DIR = os.getenv("MODELS_DIR", "/kuiper/models")
 CONFIDENCE_THR = float(os.getenv("CONFIDENCE_THR", "0.45"))
 CAMERA_ID = os.getenv("CAMERA_ID", "cam-rpi-01")
 
-# Models are lazy-loaded on first inference call
+# Lazy-loaded references
 _models = None
+_cv2 = None
+_np = None
+
+HELMET_CLASS = 0
+HEAD_CLASS = 1
+
+
+def _get_cv2():
+    """Lazy import of OpenCV."""
+    global _cv2
+    if _cv2 is None:
+        import cv2
+        _cv2 = cv2
+        log.info("OpenCV loaded: %s", cv2.__version__)
+    return _cv2
+
+
+def _get_np():
+    """Lazy import of numpy."""
+    global _np
+    if _np is None:
+        import numpy
+        _np = numpy
+    return _np
 
 
 def _load_models():
@@ -51,7 +75,6 @@ def _load_models():
     ultralytics.checks = lambda: None
     logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
-    # Try TFLite first, then ONNX, then .pt as fallback
     base_candidates = [
         os.path.join(MODELS_DIR, "yolov8n_saved_model", "yolov8n_float32.tflite"),
         os.path.join(MODELS_DIR, "yolov8n.tflite"),
@@ -87,11 +110,6 @@ def _load_models():
     return _models
 
 
-# PPE detection class indices (from keremberke/yolov8n-hard-hat-detection)
-HELMET_CLASS = 0
-HEAD_CLASS = 1
-
-
 def _detect_persons(frame, models):
     """Run YOLOv8 on full frame, return person bounding boxes."""
     results = models["base"](
@@ -123,7 +141,6 @@ def _check_helmet_model(crop, models):
             elif cls == HEAD_CLASS:
                 head_detected = True
 
-    # If neither head nor helmet visible, assume compliant (person facing away)
     if not head_detected and not helmet_detected:
         return True, 0.5
 
@@ -132,6 +149,9 @@ def _check_helmet_model(crop, models):
 
 def _check_helmet_hsv(crop):
     """Fallback: detect helmet by HSV color analysis in the head region."""
+    cv2 = _get_cv2()
+    np = _get_np()
+
     h = crop.shape[0]
     head = crop[0:int(h * 0.30), :]
     if head.size == 0:
@@ -158,6 +178,9 @@ def _check_helmet_hsv(crop):
 
 def _check_vest(crop):
     """Detect reflective vest by HSV color in the torso region."""
+    cv2 = _get_cv2()
+    np = _get_np()
+
     h = crop.shape[0]
     torso = crop[int(h * 0.30):int(h * 0.70), :]
     if torso.size == 0:
@@ -189,7 +212,9 @@ def _classify_severity(helmet_ok, vest_ok):
 
 
 def process_frame(frame_bytes):
-    """Core inference pipeline: frame bytes → list of detection dicts."""
+    """Core inference pipeline: frame bytes -> list of detection dicts."""
+    cv2 = _get_cv2()
+    np = _get_np()
     models = _load_models()
 
     frame = cv2.imdecode(
@@ -272,5 +297,4 @@ class PpeInference(Function):
 
 if __name__ == '__main__':
     from ekuiper import plugin
-    # Start the IPC server and register the function
     plugin.start(functions={"ppeInference": PpeInference})
