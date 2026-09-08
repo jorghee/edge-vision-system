@@ -14,16 +14,26 @@ for rule in ppe_alert_critical ppe_alert_high ppe_monitor alert_critical alert_h
 done
 for stream in video_frames camera_events; do
     curl -s -X DELETE "${API_URL}/streams/${stream}" > /dev/null 2>&1 || true
+    curl -s -X DELETE "${API_URL}/streams/${stream}"
 done
+curl -s -X DELETE "${API_URL}/plugins/portables/ppe_inference" || true
 
-echo "[2/5] Creating video stream..."
+echo "[2/6] Registering Portable Plugin (ppe_inference)..."
+curl -s -X POST "${API_URL}/plugins/portables" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "ppe_inference",
+    "file": "file:///kuiper/plugins/portables/ppe_inference"
+  }'
+
+echo "[3/6] Creating video stream..."
 curl -s -X POST "${API_URL}/streams" \
   -H "Content-Type: application/json" \
   -d '{
     "sql": "CREATE STREAM video_frames () WITH (TYPE=\"video\", CONF_KEY=\"default\", FORMAT=\"binary\")"
   }'
 
-echo "[3/5] Creating PPE detection rule (critical alerts)..."
+echo "[4/6] Creating PPE detection rule (critical alerts)..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{
@@ -35,7 +45,7 @@ curl -s -X POST "${API_URL}/rules" \
     ]
   }'
 
-echo "[4/5] Creating PPE detection rule (high alerts)..."
+echo "[5/6] Creating PPE detection rule (high alerts)..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{
@@ -47,7 +57,7 @@ curl -s -X POST "${API_URL}/rules" \
     ]
   }'
 
-echo "[5/5] Creating monitoring rule (all non-clear events)..."
+echo "[6/6] Creating monitoring rule (all non-clear events)..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{

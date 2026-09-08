@@ -270,5 +270,7 @@ class PpeInference(Function):
         return False
 
 
-# Plugin entry point for eKuiper
-ppeInference = PpeInference()
+if __name__ == '__main__':
+    from ekuiper import plugin
+    # Start the IPC server and register the function
+    plugin.start(functions={"ppeInference": PpeInference})
