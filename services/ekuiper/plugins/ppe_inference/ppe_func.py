@@ -1,12 +1,15 @@
 """
 eKuiper Portable Python Plugin: PPE Inference.
 
-Receives a binary video frame from eKuiper's Video Source, runs
-YOLOv8 person detection, analyzes PPE compliance (helmet + vest),
-and returns structured detection results.
+Contains two components registered with eKuiper:
 
-This replaces the standalone detector.py service. All inference
-logic runs inside eKuiper's pipeline via the Portable Plugin SDK.
+1. **cameraSource**: A Portable Source that captures frames from the local
+   V4L2 camera (/dev/video0) using OpenCV. Frames are encoded as JPEG and
+   injected into the eKuiper pipeline as base64 strings.
+
+2. **ppeInference**: A Portable Function that receives a base64 frame,
+   decodes it, runs YOLOv8 person detection, analyzes PPE compliance
+   (helmet + vest), and returns structured detection results.
 
 IMPORTANT: All heavy imports (cv2, numpy, ultralytics) are deferred
 to first use. The module-level code must be fast (<1s) so that the
@@ -14,6 +17,8 @@ eKuiper IPC handshake completes before the timeout.
 """
 
 import os
+import time
+import base64
 import logging
 from datetime import datetime
 
@@ -24,18 +29,24 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 try:
-    from ekuiper import Function, Context
+    from ekuiper import Function, Context, Source
 except ImportError:
     class Function:
         def validate(self, args): return ""
         def exec(self, args, ctx): return None
         def is_aggregate(self): return False
+    class Source:
+        def configure(self, datasource, conf): pass
+        def open(self, ctx): pass
+        def close(self, ctx): pass
     class Context:
         pass
 
 MODELS_DIR = os.getenv("MODELS_DIR", "/kuiper/models")
 CONFIDENCE_THR = float(os.getenv("CONFIDENCE_THR", "0.45"))
 CAMERA_ID = os.getenv("CAMERA_ID", "cam-rpi-01")
+CAMERA_DEVICE = int(os.getenv("CAMERA_DEVICE", "0"))
+CAMERA_FPS = int(os.getenv("CAMERA_FPS", "2"))
 
 # Lazy-loaded references
 _models = None
@@ -64,6 +75,60 @@ def _get_np():
         _np = numpy
     return _np
 
+
+# ---------------------------------------------------------------------------
+# Portable Source: Camera Capture
+# ---------------------------------------------------------------------------
+
+class CameraSource(Source):
+    """Captures frames from /dev/video0 and pushes them into eKuiper."""
+
+    def configure(self, datasource: str, conf: dict):
+        self.device = conf.get("device", CAMERA_DEVICE)
+        self.interval = 1.0 / conf.get("fps", CAMERA_FPS)
+        self.width = conf.get("width", 640)
+        self.height = conf.get("height", 480)
+        self.cap = None
+        log.info("CameraSource configured: device=%s, fps=%s, res=%dx%d",
+                 self.device, conf.get("fps", CAMERA_FPS),
+                 self.width, self.height)
+
+    def open(self, ctx: Context):
+        cv2 = _get_cv2()
+        self.cap = cv2.VideoCapture(self.device)
+        if not self.cap.isOpened():
+            log.error("Failed to open camera device %s", self.device)
+            return
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        log.info("Camera opened: device=%s", self.device)
+
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                log.warning("Failed to read frame, retrying...")
+                time.sleep(1)
+                continue
+
+            # Encode frame as JPEG bytes, then base64 for transport
+            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            b64_frame = base64.b64encode(buf.tobytes()).decode("ascii")
+
+            ctx.emit({"frame": b64_frame, "camera_id": CAMERA_ID,
+                       "timestamp": datetime.utcnow().isoformat() + "Z"})
+
+            time.sleep(self.interval)
+
+    def close(self, ctx: Context):
+        if self.cap and self.cap.isOpened():
+            self.cap.release()
+            log.info("Camera released")
+
+
+# ---------------------------------------------------------------------------
+# AI Model Loading (lazy)
+# ---------------------------------------------------------------------------
 
 def _load_models():
     global _models
@@ -109,6 +174,10 @@ def _load_models():
     log.info("Models loaded successfully")
     return _models
 
+
+# ---------------------------------------------------------------------------
+# PPE Detection Helpers
+# ---------------------------------------------------------------------------
 
 def _detect_persons(frame, models):
     """Run YOLOv8 on full frame, return person bounding boxes."""
@@ -268,24 +337,29 @@ def process_frame(frame_bytes):
     return detections
 
 
+# ---------------------------------------------------------------------------
+# Portable Function: PPE Inference
+# ---------------------------------------------------------------------------
+
 class PpeInference(Function):
     """eKuiper Portable Plugin function.
 
-    Called from SQL rules as: ppeInference(self)
-    Receives binary frame data, returns list of detection results.
+    Called from SQL rules as: ppeInference(frame)
+    Receives base64-encoded frame string, returns list of detection results.
     """
 
     def validate(self, args: list) -> str:
         if len(args) != 1:
-            return "ppeInference requires exactly one argument (binary frame)"
+            return "ppeInference requires exactly one argument (frame data)"
         return ""
 
     def exec(self, args: list, ctx: Context) -> list:
         try:
-            frame_bytes = args[0]
-            if isinstance(frame_bytes, str):
-                import base64
-                frame_bytes = base64.b64decode(frame_bytes)
+            frame_data = args[0]
+            if isinstance(frame_data, str):
+                frame_bytes = base64.b64decode(frame_data)
+            else:
+                frame_bytes = frame_data
             return process_frame(frame_bytes)
         except Exception as e:
             log.error("Inference error: %s", e, exc_info=True)
@@ -295,11 +369,15 @@ class PpeInference(Function):
         return False
 
 
+# ---------------------------------------------------------------------------
+# Plugin entry point
+# ---------------------------------------------------------------------------
+
 if __name__ == '__main__':
     from ekuiper.runtime.plugin import PluginConfig, start
     c = PluginConfig(
         name="ppe_inference",
-        sources={},
+        sources={"cameraSource": lambda: CameraSource()},
         sinks={},
         functions={"ppeInference": lambda: PpeInference()},
     )

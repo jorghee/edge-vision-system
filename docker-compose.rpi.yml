@@ -48,7 +48,7 @@ services:
       - ekuiper-log:/kuiper/log
       - ./services/ekuiper/plugins/ppe_inference:/kuiper/plugins/portables/ppe_inference
       - ./services/detector/models:/kuiper/models
-      - ./infrastructure/ekuiper/sources/video.yaml:/kuiper/etc/sources/video.yaml
+      - ./infrastructure/ekuiper/sources/cameraSource.yaml:/kuiper/etc/sources/cameraSource.yaml
     depends_on:
       - mqtt
     networks:

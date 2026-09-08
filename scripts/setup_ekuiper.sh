@@ -1,5 +1,5 @@
 #!/bin/bash
-# Provisions eKuiper with portable plugin, video stream, AI inference rules, and alert routing.
+# Provisions eKuiper with portable plugin, camera stream, AI inference rules, and alert routing.
 # Idempotent: safe to re-run; deletes existing config before recreating.
 
 set -euo pipefail
@@ -15,7 +15,7 @@ echo "[1/6] Cleaning previous configuration..."
 for rule in ppe_alert_critical ppe_alert_high ppe_monitor alert_critical alert_high monitor_all; do
     curl -s -X DELETE "${API_URL}/rules/${rule}" > /dev/null 2>&1 || true
 done
-for stream in video_frames camera_events; do
+for stream in camera_frames video_frames camera_events; do
     curl -s -X DELETE "${API_URL}/streams/${stream}" > /dev/null 2>&1 || true
 done
 curl -s -X DELETE "${API_URL}/plugins/portables/ppe_inference" > /dev/null 2>&1 || true
@@ -38,14 +38,14 @@ REGISTER_RESULT=$(curl -s -X POST "${API_URL}/plugins/portables" \
   -d '{"name": "ppe_inference", "file": "file:///tmp/ppe_inference.zip"}')
 echo "  ${REGISTER_RESULT}"
 
-# Wait for the plugin process to start and register functions
-sleep 3
+# Wait for the plugin process to start and register sources/functions
+sleep 5
 
-echo "[3/6] Creating video stream..."
+echo "[3/6] Creating camera stream (portable source: cameraSource)..."
 curl -s -X POST "${API_URL}/streams" \
   -H "Content-Type: application/json" \
   -d '{
-    "sql": "CREATE STREAM video_frames () WITH (TYPE=\"video\", CONF_KEY=\"default\", FORMAT=\"binary\")"
+    "sql": "CREATE STREAM camera_frames () WITH (TYPE=\"cameraSource\", CONF_KEY=\"default\", FORMAT=\"json\")"
   }'
 echo ""
 
@@ -54,7 +54,7 @@ curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{
     "id": "ppe_alert_critical",
-    "sql": "SELECT * FROM video_frames WHERE ppeInference(self)->severity = '\''critical'\''",
+    "sql": "SELECT * FROM camera_frames WHERE ppeInference(frame)->severity = '\''critical'\''",
     "actions": [
       { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1 } },
       { "log": {} }
@@ -67,7 +67,7 @@ curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{
     "id": "ppe_alert_high",
-    "sql": "SELECT * FROM video_frames WHERE ppeInference(self)->severity = '\''high'\''",
+    "sql": "SELECT * FROM camera_frames WHERE ppeInference(frame)->severity = '\''high'\''",
     "actions": [
       { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1 } },
       { "log": {} }
@@ -80,7 +80,7 @@ curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
   -d '{
     "id": "ppe_monitor",
-    "sql": "SELECT * FROM video_frames WHERE ppeInference(self)->event_type != '\''clear'\''",
+    "sql": "SELECT * FROM camera_frames WHERE ppeInference(frame)->event_type != '\''clear'\''",
     "actions": [
       { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/monitor", "qos": 0 } }
     ]
@@ -88,3 +88,6 @@ curl -s -X POST "${API_URL}/rules" \
 echo ""
 
 echo "[OK] eKuiper configuration completed (eKuiper-native pipeline)."
+echo ""
+echo "Verify with:"
+echo "  curl -s http://localhost:9081/rules/ppe_monitor/status | python3 -m json.tool"
