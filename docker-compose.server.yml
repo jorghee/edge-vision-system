@@ -1,0 +1,58 @@
+# Central Server: MQTT Broker + Action Service
+#
+# This runs on the central server (laptop, cloud VM, etc).
+# Edge devices (Raspberry Pi) connect to this broker over the LAN.
+#
+# Usage:
+#   docker compose -f docker-compose.server.yml up -d
+#
+# Environment variables (optional, defaults shown):
+#   MQTT_USER_EDGE=edge_device
+#   MQTT_PASS_EDGE=SecureEdge2026!
+#   MQTT_USER_ACTION=action_service
+#   MQTT_PASS_ACTION=SecureAction2026!
+
+networks:
+  server-net:
+    driver: bridge
+
+volumes:
+  mosquitto-data:
+
+services:
+
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    environment:
+      MQTT_USER_EDGE: "${MQTT_USER_EDGE:-edge_device}"
+      MQTT_PASS_EDGE: "${MQTT_PASS_EDGE:-SecureEdge2026!}"
+      MQTT_USER_ACTION: "${MQTT_USER_ACTION:-action_service}"
+      MQTT_PASS_ACTION: "${MQTT_PASS_ACTION:-SecureAction2026!}"
+    volumes:
+      - ./infrastructure/mqtt/server-config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./infrastructure/mqtt/server-config/entrypoint.sh:/entrypoint.sh
+      - mosquitto-data:/mosquitto/data
+    entrypoint: /entrypoint.sh
+    networks:
+      - server-net
+
+  action_service:
+    build: ./services/action_service
+    container_name: edge-actions
+    restart: unless-stopped
+    environment:
+      MQTT_BROKER: mqtt
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: "${MQTT_USER_ACTION:-action_service}"
+      MQTT_PASSWORD: "${MQTT_PASS_ACTION:-SecureAction2026!}"
+      ALERT_TOPIC: edge/alerts
+      ACTION_TOPIC: edge/actions
+    depends_on:
+      - mqtt
+    networks:
+      - server-net

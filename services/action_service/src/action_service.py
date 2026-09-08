@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 ALERT_TOPIC = os.getenv("ALERT_TOPIC", "edge/alerts")
 ACTION_TOPIC = os.getenv("ACTION_TOPIC", "edge/actions")
 
@@ -94,6 +96,11 @@ def main():
     client = mqtt.Client(client_id="action-service")
     client.on_connect = on_connect
     client.on_message = on_message
+
+    # Set credentials if provided
+    if MQTT_USERNAME:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+        log.info("MQTT authentication enabled for user: %s", MQTT_USERNAME)
 
     # Try again connection
     for attempt in range(10):

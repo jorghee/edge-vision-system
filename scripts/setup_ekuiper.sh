@@ -1,6 +1,14 @@
 #!/bin/bash
 # Provisions eKuiper with portable plugin, camera stream, AI inference rules, and alert routing.
 # Idempotent: safe to re-run; deletes existing config before recreating.
+#
+# Architecture:
+#   RPi Camera → MediaMTX (RTSP) → eKuiper → ppeInference() → MQTT → Central Server
+#
+# Environment variables (read from the eKuiper container or overridden):
+#   MQTT_SERVER_URL  - Central server MQTT (default from container env)
+#   MQTT_USERNAME    - MQTT auth username (default from container env)
+#   MQTT_PASSWORD    - MQTT auth password (default from container env)
 
 set -euo pipefail
 
@@ -10,6 +18,13 @@ API_URL="http://${EKUIPER_HOST}:${EKUIPER_PORT}"
 
 # Name of the Docker container running eKuiper
 EKUIPER_CONTAINER="${EKUIPER_CONTAINER:-ekuiper-engine}"
+
+# Read MQTT config from the eKuiper container's environment (or override locally)
+MQTT_SERVER_URL="${MQTT_SERVER_URL:-$(docker exec "${EKUIPER_CONTAINER}" printenv MQTT_SERVER_URL 2>/dev/null || echo 'tcp://localhost:1883')}"
+MQTT_USERNAME="${MQTT_USERNAME:-$(docker exec "${EKUIPER_CONTAINER}" printenv MQTT_USERNAME 2>/dev/null || echo '')}"
+MQTT_PASSWORD="${MQTT_PASSWORD:-$(docker exec "${EKUIPER_CONTAINER}" printenv MQTT_PASSWORD 2>/dev/null || echo '')}"
+
+echo "MQTT target: ${MQTT_SERVER_URL} (user: ${MQTT_USERNAME:-anonymous})"
 
 echo "[1/6] Cleaning previous configuration..."
 for rule in ppe_alert_critical ppe_alert_high ppe_monitor alert_critical alert_high monitor_all; do
@@ -21,8 +36,6 @@ done
 curl -s -X DELETE "${API_URL}/plugins/portables/ppe_inference" > /dev/null 2>&1 || true
 
 echo "[2/6] Registering Portable Plugin (ppe_inference)..."
-# eKuiper REST API requires a .zip file, not a directory path.
-# Create the zip inside the container using Python (already installed).
 docker exec "${EKUIPER_CONTAINER}" python3 -c "
 import zipfile, os
 plugin_dir = '/kuiper/plugins/portables/ppe_inference'
@@ -52,45 +65,51 @@ curl -s -X POST "${API_URL}/streams" \
   }'
 echo ""
 
+# Build MQTT sink config with authentication
+MQTT_SINK_ALERTS="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/alerts\",\"qos\":1,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
+MQTT_SINK_MONITOR="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/monitor\",\"qos\":0,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
+
 echo "[4/6] Creating PPE detection rule (critical alerts)..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
-  -d '{
-    "id": "ppe_alert_critical",
-    "sql": "SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = '\''critical'\''",
-    "actions": [
-      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1, "maxDiskCache": 10000, "bufferPageSize": 1, "resendInterval": 2000, "cleanCacheAtStop": false } },
-      { "log": {} }
+  -d "{
+    \"id\": \"ppe_alert_critical\",
+    \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = 'critical'\",
+    \"actions\": [
+      {\"mqtt\": ${MQTT_SINK_ALERTS}},
+      {\"log\": {}}
     ]
-  }'
+  }"
 echo ""
 
 echo "[5/6] Creating PPE detection rule (high alerts)..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
-  -d '{
-    "id": "ppe_alert_high",
-    "sql": "SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = '\''high'\''",
-    "actions": [
-      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1, "maxDiskCache": 10000, "bufferPageSize": 1, "resendInterval": 2000, "cleanCacheAtStop": false } },
-      { "log": {} }
+  -d "{
+    \"id\": \"ppe_alert_high\",
+    \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = 'high'\",
+    \"actions\": [
+      {\"mqtt\": ${MQTT_SINK_ALERTS}},
+      {\"log\": {}}
     ]
-  }'
+  }"
 echo ""
 
 echo "[6/6] Creating monitoring rule (all non-clear events)..."
 curl -s -X POST "${API_URL}/rules" \
   -H "Content-Type: application/json" \
-  -d '{
-    "id": "ppe_monitor",
-    "sql": "SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->event_type != '\''clear'\''",
-    "actions": [
-      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/monitor", "qos": 0, "maxDiskCache": 10000, "bufferPageSize": 1, "resendInterval": 2000, "cleanCacheAtStop": false } }
+  -d "{
+    \"id\": \"ppe_monitor\",
+    \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->event_type != 'clear'\",
+    \"actions\": [
+      {\"mqtt\": ${MQTT_SINK_MONITOR}}
     ]
-  }'
+  }"
 echo ""
 
-echo "[OK] eKuiper configuration completed (eKuiper-native pipeline)."
+echo "[OK] eKuiper configuration completed."
+echo ""
+echo "MQTT sink target: ${MQTT_SERVER_URL}"
 echo ""
 echo "Verify with:"
 echo "  curl -s http://localhost:9081/rules/ppe_monitor/status | python3 -m json.tool"

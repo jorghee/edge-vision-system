@@ -1,32 +1,26 @@
-version: "3.8"
-
-# eKuiper-native architecture:
-#   MediaMTX captures CSI camera via libcamera -> RTSP stream
-#   eKuiper Portable Plugin reads RTSP, runs AI inference, publishes to MQTT
+# Edge Device (Raspberry Pi 4): Camera + AI Inference
+#
+# Captures video via MediaMTX (libcamera), processes with eKuiper + YOLOv8,
+# and publishes detection results to the CENTRAL SERVER's MQTT broker.
+#
+# Usage:
+#   MQTT_SERVER_URL=tcp://192.168.1.100:1883 docker compose -f docker-compose.rpi.yml up -d
+#
+# Environment variables:
+#   MQTT_SERVER_URL  - Central server MQTT broker (required, e.g. tcp://192.168.1.100:1883)
+#   MQTT_USERNAME    - MQTT auth username (default: edge_device)
+#   MQTT_PASSWORD    - MQTT auth password (default: SecureEdge2026!)
+#   CAMERA_ID        - Unique identifier for this camera (default: cam-rpi-01)
 
 networks:
   edge-net:
     driver: bridge
 
 volumes:
-  mosquitto-data:
   ekuiper-data:
   ekuiper-log:
 
 services:
-
-  mqtt:
-    image: eclipse-mosquitto:2.0
-    container_name: mqtt-broker
-    restart: unless-stopped
-    ports:
-      - "1883:1883"
-      - "9001:9001"
-    volumes:
-      - ./infrastructure/mqtt/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - mosquitto-data:/mosquitto/data
-    networks:
-      - edge-net
 
   # MediaMTX: RTSP server with native RPi camera support via libcamera.
   # Exposes the CSI camera as an RTSP stream at rtsp://mediamtx:8554/cam
@@ -53,12 +47,17 @@ services:
     ports:
       - "9081:9081"
     environment:
-      MQTT_SOURCE__DEFAULT__SERVER: "tcp://mqtt:1883"
+      # MQTT: points to the CENTRAL SERVER (configurable)
+      MQTT_SERVER_URL: "${MQTT_SERVER_URL:?Set MQTT_SERVER_URL to the central server, e.g. tcp://192.168.1.100:1883}"
+      MQTT_USERNAME: "${MQTT_USERNAME:-edge_device}"
+      MQTT_PASSWORD: "${MQTT_PASSWORD:-SecureEdge2026!}"
+      # eKuiper internals
       KUIPER__PORTABLE__PYTHON_BIN: "python3"
       KUIPER__PORTABLE__INITTIMEOUT: "60000"
       KUIPER__PORTABLE__SENDTIMEOUT: "60000"
+      # AI inference
       MODELS_DIR: "/kuiper/models"
-      CAMERA_ID: "cam-rpi-01"
+      CAMERA_ID: "${CAMERA_ID:-cam-rpi-01}"
       CONFIDENCE_THR: "0.45"
       RTSP_URL: "rtsp://mediamtx:8554/cam"
     volumes:
@@ -68,21 +67,6 @@ services:
       - ./services/detector/models:/kuiper/models
       - ./infrastructure/ekuiper/sources/cameraSource.yaml:/kuiper/etc/sources/cameraSource.yaml
     depends_on:
-      - mqtt
       - mediamtx
-    networks:
-      - edge-net
-
-  action_service:
-    build: ./services/action_service
-    container_name: edge-actions
-    restart: unless-stopped
-    environment:
-      MQTT_BROKER: mqtt
-      MQTT_PORT: "1883"
-      ALERT_TOPIC: edge/alerts
-      ACTION_TOPIC: edge/actions
-    depends_on:
-      - mqtt
     networks:
       - edge-net
