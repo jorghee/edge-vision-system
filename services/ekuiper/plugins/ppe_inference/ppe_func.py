@@ -298,20 +298,20 @@ def process_frame(frame_bytes):
         np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR
     )
     if frame is None:
-        return [{"event_type": "error", "severity": "none",
-                 "confidence": 0.0}]
+        return {"event_type": "error", "severity": "none",
+                "confidence": 0.0}
 
     persons = _detect_persons(frame, models)
 
     if not persons:
-        return [{
+        return {
             "camera_id": CAMERA_ID,
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "event_type": "clear",
             "severity": "none",
             "confidence": 0.99,
             "persons_detected": 0,
-        }]
+        }
 
     detections = []
     for person_id, (x1, y1, x2, y2, person_conf) in enumerate(persons):
@@ -343,7 +343,21 @@ def process_frame(frame_bytes):
             "persons_detected": len(persons),
         })
 
-    return detections
+    if not detections:
+        return {
+            "camera_id": CAMERA_ID,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "event_type": "clear",
+            "severity": "none",
+            "confidence": 0.99,
+            "persons_detected": len(persons),
+        }
+
+    # Sort by severity: critical > high > none
+    severity_rank = {"critical": 0, "high": 1, "none": 2}
+    detections.sort(key=lambda d: severity_rank.get(d["severity"], 3))
+
+    return detections[0]
 
 
 # Portable Function: PPE Inference
@@ -359,7 +373,7 @@ class PpeInference(Function):
             return "ppeInference requires exactly one argument (frame data)"
         return ""
 
-    def exec(self, args: list, ctx: Context) -> list:
+    def exec(self, args: list, ctx: Context) -> dict:
         try:
             frame_data = args[0]
             if isinstance(frame_data, str):
@@ -369,8 +383,8 @@ class PpeInference(Function):
             return process_frame(frame_bytes)
         except Exception as e:
             log.error("Inference error: %s", e, exc_info=True)
-            return [{"event_type": "error", "severity": "none",
-                     "error": str(e)}]
+            return {"event_type": "error", "severity": "none",
+                    "error": str(e)}
 
     def is_aggregate(self) -> bool:
         return False
