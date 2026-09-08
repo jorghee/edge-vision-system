@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "architecture-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/backend-development/skills/architecture-patterns/SKILL.md",
+      "computedHash": "a66aaa5aa49b75bec12b6270dcde8794b1f0cc75fbb9ecb999e43f8b723b461f"
+    },
+    "docker-essentials": {
+      "source": "sundial-org/awesome-openclaw-skills",
+      "sourceType": "github",
+      "skillPath": "skills/docker-essentials/SKILL.md",
+      "computedHash": "f7d90f0c76e2f560272c84b85b8e27411fd0cddb14921e4866fca1f6373c0e1b"
+    },
+    "mqtt-development": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "skillPath": "mqtt-development/SKILL.md",
+      "computedHash": "59a0b16fbba484cf2939eaaeac25af0f77673b2a0aeecac347b7e41f51b839cd"
+    },
+    "python-best-practices": {
+      "source": "alleneubank/claude-code",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/python-best-practices/SKILL.md",
+      "computedHash": "b88ca3b74543fb0b83d9eb675370bd4c849d50f273128a31095702ffb2e1be87"
+    }
+  }
+}
