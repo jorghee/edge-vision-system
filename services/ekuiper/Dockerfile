@@ -13,4 +13,3 @@ COPY plugins/ppe_inference/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Revert to the default non-root user for eKuiper
-USER kuiper
