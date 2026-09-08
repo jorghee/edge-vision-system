@@ -1,4 +1,4 @@
-# Central Server: MQTT Broker + Action Service
+# Central Server: MQTT Broker + Action Service + Monitoring Stack
 #
 # This runs on the central server (laptop, cloud VM, etc).
 # Edge devices (Raspberry Pi) connect to this broker over the LAN.
@@ -6,11 +6,20 @@
 # Usage:
 #   docker compose -f docker-compose.server.yml up -d
 #
+# Services:
+#   - mqtt:           Mosquitto MQTT Broker (with authentication)
+#   - action_service: Alert processing and response
+#   - influxdb:       Time-series database for metrics and events
+#   - telegraf:       MQTT → InfluxDB bridge
+#   - grafana:        Dashboards and visualization (port 3000)
+#
 # Environment variables (optional, defaults shown):
 #   MQTT_USER_EDGE=edge_device
 #   MQTT_PASS_EDGE=SecureEdge2026!
 #   MQTT_USER_ACTION=action_service
 #   MQTT_PASS_ACTION=SecureAction2026!
+#   INFLUX_TOKEN=edge-vision-token-2026
+#   GF_SECURITY_ADMIN_PASSWORD=admin
 
 networks:
   server-net:
@@ -18,9 +27,12 @@ networks:
 
 volumes:
   mosquitto-data:
+  influxdb-data:
+  grafana-data:
 
 services:
 
+  # MQTT Broker
   mqtt:
     image: eclipse-mosquitto:2.0
     container_name: mqtt-broker
@@ -41,6 +53,7 @@ services:
     networks:
       - server-net
 
+  # Action Service
   action_service:
     build: ./services/action_service
     container_name: edge-actions
@@ -54,5 +67,63 @@ services:
       ACTION_TOPIC: edge/actions
     depends_on:
       - mqtt
+    networks:
+      - server-net
+
+  # InfluxDB (Time-Series Database)
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: EdgeVision2026!
+      DOCKER_INFLUXDB_INIT_ORG: edge-vision
+      DOCKER_INFLUXDB_INIT_BUCKET: edge-data
+      DOCKER_INFLUXDB_INIT_RETENTION: 30d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: "${INFLUX_TOKEN:-edge-vision-token-2026}"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    networks:
+      - server-net
+
+  # Telegraf (MQTT → InfluxDB Bridge)
+  telegraf:
+    image: telegraf:1.31
+    container_name: telegraf
+    restart: unless-stopped
+    environment:
+      INFLUX_TOKEN: "${INFLUX_TOKEN:-edge-vision-token-2026}"
+      MQTT_USERNAME: "${MQTT_USER_EDGE:-edge_device}"
+      MQTT_PASSWORD: "${MQTT_PASS_EDGE:-SecureEdge2026!}"
+    volumes:
+      - ./infrastructure/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      - mqtt
+      - influxdb
+    networks:
+      - server-net
+
+  # Grafana (Dashboards)
+  grafana:
+    image: grafana/grafana-oss:11.1.0
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      INFLUX_TOKEN: "${INFLUX_TOKEN:-edge-vision-token-2026}"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - influxdb
     networks:
       - server-net

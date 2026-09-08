@@ -70,3 +70,23 @@ services:
       - mediamtx
     networks:
       - edge-net
+
+  # Node Agent: lightweight device metrics collector
+  node_agent:
+    build: ./services/node_agent
+    container_name: node-agent
+    restart: unless-stopped
+    environment:
+      MQTT_SERVER_URL: "${MQTT_SERVER_URL:?Set MQTT_SERVER_URL to the central server}"
+      MQTT_USERNAME: "${MQTT_USERNAME:-edge_device}"
+      MQTT_PASSWORD: "${MQTT_PASSWORD:-SecureEdge2026!}"
+      CAMERA_ID: "${CAMERA_ID:-cam-rpi-01}"
+      COLLECT_INTERVAL: "30"
+      EKUIPER_API: "http://ekuiper-engine:9081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+    depends_on:
+      - ekuiper
+    networks:
+      - edge-net

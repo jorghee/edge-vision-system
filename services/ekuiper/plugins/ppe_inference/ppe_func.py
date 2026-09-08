@@ -359,7 +359,20 @@ def process_frame(frame_bytes):
     severity_rank = {"critical": 0, "high": 1, "none": 2}
     detections.sort(key=lambda d: severity_rank.get(d["severity"], 3))
 
-    return detections[0]
+    result = detections[0]
+
+    # Attach a compressed thumbnail for critical/high alerts (for Grafana)
+    if result["severity"] in ("critical", "high"):
+        try:
+            thumb = cv2.resize(frame, (320, 240))
+            _, buf = cv2.imencode(
+                ".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 50])
+            result["snapshot"] = base64.b64encode(
+                buf.tobytes()).decode("ascii")
+        except Exception as e:
+            log.warning("Failed to generate snapshot: %s", e)
+
+    return result
 
 
 # Portable Function: PPE Inference
