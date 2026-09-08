@@ -53,8 +53,8 @@ services:
       MQTT_PASSWORD: "${MQTT_PASSWORD:-SecureEdge2026!}"
       # eKuiper internals
       KUIPER__PORTABLE__PYTHON_BIN: "python3"
-      KUIPER__PORTABLE__INITTIMEOUT: "60000"
-      KUIPER__PORTABLE__SENDTIMEOUT: "60000"
+      KUIPER__PORTABLE__INITTIMEOUT: "120000"
+      KUIPER__PORTABLE__SENDTIMEOUT: "120000"
       # AI inference
       MODELS_DIR: "/kuiper/models"
       CAMERA_ID: "${CAMERA_ID:-cam-rpi-01}"

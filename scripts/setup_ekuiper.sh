@@ -26,6 +26,40 @@ MQTT_PASSWORD="${MQTT_PASSWORD:-$(docker exec "${EKUIPER_CONTAINER}" printenv MQ
 
 echo "MQTT target: ${MQTT_SERVER_URL} (user: ${MQTT_USERNAME:-anonymous})"
 
+# ── Helper: create an eKuiper rule with retry logic ──────────────────────────
+# On ARM64, the portable plugin (Python + OpenCV + YOLO) can take over 60s to
+# fully initialize. eKuiper validates the SQL by calling the function at rule
+# creation time, which may time out if the plugin is still loading.
+# This function retries with exponential backoff until the plugin is ready.
+create_rule() {
+    local rule_name="$1"
+    local rule_json="$2"
+    local max_attempts=6
+    local wait_time=20
+
+    for attempt in $(seq 1 $max_attempts); do
+        result=$(curl -s -X POST "${API_URL}/rules" \
+          -H "Content-Type: application/json" \
+          -d "$rule_json")
+
+        if echo "$result" | grep -q '"error"'; then
+            echo "  Attempt ${attempt}/${max_attempts} — plugin not ready yet."
+            if [ $attempt -lt $max_attempts ]; then
+                echo "  Waiting ${wait_time}s for plugin initialization..."
+                sleep $wait_time
+                wait_time=$((wait_time + 15))
+            else
+                echo "  [ERROR] Rule '${rule_name}' failed after ${max_attempts} attempts."
+                echo "  Last error: ${result}"
+                return 1
+            fi
+        else
+            echo "  Rule '${rule_name}' created successfully."
+            return 0
+        fi
+    done
+}
+
 echo "[1/6] Cleaning previous configuration..."
 for rule in ppe_alert_critical ppe_alert_high ppe_monitor alert_critical alert_high monitor_all; do
     curl -s -X DELETE "${API_URL}/rules/${rule}" > /dev/null 2>&1 || true
@@ -54,9 +88,6 @@ REGISTER_RESULT=$(curl -s -X POST "${API_URL}/plugins/portables" \
   -d '{"name": "ppe_inference", "file": "file:///tmp/ppe_inference.zip"}')
 echo "  ${REGISTER_RESULT}"
 
-# Wait for the plugin to fully initialize (cv2 import + RTSP connection on ARM64)
-sleep 15
-
 echo "[3/6] Creating camera stream (portable source: cameraSource)..."
 curl -s -X POST "${API_URL}/streams" \
   -H "Content-Type: application/json" \
@@ -70,9 +101,7 @@ MQTT_SINK_ALERTS="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/alerts\",\
 MQTT_SINK_MONITOR="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/monitor\",\"qos\":0,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
 
 echo "[4/6] Creating PPE detection rule (critical alerts)..."
-curl -s -X POST "${API_URL}/rules" \
-  -H "Content-Type: application/json" \
-  -d "{
+create_rule "ppe_alert_critical" "{
     \"id\": \"ppe_alert_critical\",
     \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = 'critical'\",
     \"actions\": [
@@ -80,12 +109,9 @@ curl -s -X POST "${API_URL}/rules" \
       {\"log\": {}}
     ]
   }"
-echo ""
 
 echo "[5/6] Creating PPE detection rule (high alerts)..."
-curl -s -X POST "${API_URL}/rules" \
-  -H "Content-Type: application/json" \
-  -d "{
+create_rule "ppe_alert_high" "{
     \"id\": \"ppe_alert_high\",
     \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = 'high'\",
     \"actions\": [
@@ -93,20 +119,17 @@ curl -s -X POST "${API_URL}/rules" \
       {\"log\": {}}
     ]
   }"
-echo ""
 
 echo "[6/6] Creating monitoring rule (all non-clear events)..."
-curl -s -X POST "${API_URL}/rules" \
-  -H "Content-Type: application/json" \
-  -d "{
+create_rule "ppe_monitor" "{
     \"id\": \"ppe_monitor\",
     \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->event_type != 'clear'\",
     \"actions\": [
       {\"mqtt\": ${MQTT_SINK_MONITOR}}
     ]
   }"
-echo ""
 
+echo ""
 echo "[OK] eKuiper configuration completed."
 echo ""
 echo "MQTT sink target: ${MQTT_SERVER_URL}"
