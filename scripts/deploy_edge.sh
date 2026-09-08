@@ -15,6 +15,16 @@ echo "[INFO] The Raspberry Pi must be powered on with SSH enabled."
 echo "========================================================="
 echo ""
 
+MQTT_SERVER_URL="${1:-}"
+if [ -z "${MQTT_SERVER_URL}" ]; then
+    echo "[ERROR] MQTT_SERVER_URL is required."
+    echo "Usage: bash scripts/deploy_edge.sh <MQTT_SERVER_URL>"
+    echo "Example: bash scripts/deploy_edge.sh tcp://192.168.1.100:1883"
+    exit 1
+fi
+echo "[INFO] Edge will connect to central server at: ${MQTT_SERVER_URL}"
+echo ""
+
 # Prepare models locally (TFLite + NCNN)
 echo "[1/6] Preparing models locally..."
 bash "${SCRIPT_DIR}/prepare_models.sh"
@@ -112,9 +122,9 @@ echo "[OK] Starting Edge Vision System on Raspberry Pi..."
 ssh -t "${RPI_USER}@${RPI_IP}" "
     cd '${RPI_PROJECT_DIR}'
     if groups | grep -q docker; then
-        bash scripts/start_rpi.sh
+        MQTT_SERVER_URL='${MQTT_SERVER_URL}' bash scripts/start_rpi.sh
     else
         echo '[INFO] Running with newgrp docker for first-time setup...'
-        sg docker -c 'bash scripts/start_rpi.sh'
+        sg docker -c 'MQTT_SERVER_URL=\"${MQTT_SERVER_URL}\" bash scripts/start_rpi.sh'
     fi
 "
