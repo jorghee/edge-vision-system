@@ -150,6 +150,7 @@ def _load_models():
     logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
     base_candidates = [
+        os.path.join(MODELS_DIR, "yolov8n_ncnn_model"),
         os.path.join(MODELS_DIR, "yolov8n_saved_model",
                      "yolov8n_float32.tflite"),
         os.path.join(MODELS_DIR, "yolov8n.tflite"),
@@ -157,6 +158,7 @@ def _load_models():
         os.path.join(MODELS_DIR, "yolov8n.pt"),
     ]
     ppe_candidates = [
+        os.path.join(MODELS_DIR, "ppe_detector_ncnn_model"),
         os.path.join(MODELS_DIR, "ppe_detector_saved_model",
                      "ppe_detector_float32.tflite"),
         os.path.join(MODELS_DIR, "ppe_detector.tflite"),
