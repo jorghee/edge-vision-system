@@ -30,8 +30,14 @@ else
     DETECTED_IP=$(ip route get 1.1.1.1 | awk '{print $7}')
 fi
 
-read -rp "Is this the correct Central Server IP? [${DETECTED_IP}]: " USER_IP
-SERVER_IP="${USER_IP:-${DETECTED_IP}}"
+echo "  Detected IP: ${DETECTED_IP}"
+read -rp "Press Enter to accept this IP, or type a different one: " USER_IP
+
+if [ -z "${USER_IP}" ] || [ "${USER_IP}" = "y" ] || [ "${USER_IP}" = "Y" ] || [ "${USER_IP}" = "yes" ]; then
+    SERVER_IP="${DETECTED_IP}"
+else
+    SERVER_IP="${USER_IP}"
+fi
 
 if [ -z "${SERVER_IP}" ]; then
     echo "[ERROR] Could not determine a valid IP address. Deployment aborted."
