@@ -28,8 +28,11 @@ import zipfile, os
 plugin_dir = '/kuiper/plugins/portables/ppe_inference'
 zip_path = '/tmp/ppe_inference.zip'
 with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-    for f in os.listdir(plugin_dir):
-        zf.write(os.path.join(plugin_dir, f), f)
+    for root, dirs, files in os.walk(plugin_dir):
+        for f in files:
+            full = os.path.join(root, f)
+            arc = os.path.relpath(full, plugin_dir)
+            zf.write(full, arc)
 print('Plugin zip created at', zip_path)
 "
 
