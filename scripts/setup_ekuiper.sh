@@ -41,8 +41,8 @@ REGISTER_RESULT=$(curl -s -X POST "${API_URL}/plugins/portables" \
   -d '{"name": "ppe_inference", "file": "file:///tmp/ppe_inference.zip"}')
 echo "  ${REGISTER_RESULT}"
 
-# Wait for the plugin process to start and register sources/functions
-sleep 5
+# Wait for the plugin to fully initialize (cv2 import + RTSP connection on ARM64)
+sleep 15
 
 echo "[3/6] Creating camera stream (portable source: cameraSource)..."
 curl -s -X POST "${API_URL}/streams" \
