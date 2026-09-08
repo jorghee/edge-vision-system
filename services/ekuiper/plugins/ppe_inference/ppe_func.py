@@ -3,9 +3,9 @@ eKuiper Portable Python Plugin: PPE Inference.
 
 Contains two components registered with eKuiper:
 
-1. **cameraSource**: A Portable Source that captures frames from the local
-   V4L2 camera (/dev/video0) using OpenCV. Frames are encoded as JPEG and
-   injected into the eKuiper pipeline as base64 strings.
+1. **cameraSource**: A Portable Source that captures frames from a local
+   RTSP stream (served by the MediaMTX sidecar container, which reads the
+   RPi CSI camera via libcamera). Frames are base64-encoded JPEG strings.
 
 2. **ppeInference**: A Portable Function that receives a base64 frame,
    decodes it, runs YOLOv8 person detection, analyzes PPE compliance
@@ -47,7 +47,8 @@ except ImportError:
 MODELS_DIR = os.getenv("MODELS_DIR", "/kuiper/models")
 CONFIDENCE_THR = float(os.getenv("CONFIDENCE_THR", "0.45"))
 CAMERA_ID = os.getenv("CAMERA_ID", "cam-rpi-01")
-CAMERA_DEVICE = int(os.getenv("CAMERA_DEVICE", "0"))
+# RTSP URL served by MediaMTX sidecar container
+RTSP_URL = os.getenv("RTSP_URL", "rtsp://mediamtx:8554/cam")
 CAMERA_FPS = int(os.getenv("CAMERA_FPS", "2"))
 
 # Lazy-loaded references
@@ -78,37 +79,43 @@ def _get_np():
     return _np
 
 
-# Portable Source: Camera Capture
+# Portable Source: Camera Capture via RTSP
 class CameraSource(Source):
-    """Captures frames from /dev/video0 and pushes them into eKuiper."""
+    """Captures frames from RTSP stream (MediaMTX sidecar)."""
 
     def configure(self, datasource: str, conf: dict):
-        self.device = conf.get("device", CAMERA_DEVICE)
+        self.rtsp_url = conf.get("url", RTSP_URL)
         self.interval = 1.0 / conf.get("fps", CAMERA_FPS)
-        self.width = conf.get("width", 640)
-        self.height = conf.get("height", 480)
         self.cap = None
-        log.info("CameraSource configured: device=%s, fps=%s, res=%dx%d",
-                 self.device, conf.get("fps", CAMERA_FPS),
-                 self.width, self.height)
+        log.info("CameraSource configured: url=%s, fps=%s",
+                 self.rtsp_url, conf.get("fps", CAMERA_FPS))
 
     def open(self, ctx: Context):
         cv2 = _get_cv2()
-        self.cap = cv2.VideoCapture(self.device)
-        if not self.cap.isOpened():
-            log.error("Failed to open camera device %s", self.device)
+
+        # Retry connection to RTSP (MediaMTX may still be starting)
+        for attempt in range(30):
+            self.cap = cv2.VideoCapture(self.rtsp_url)
+            if self.cap.isOpened():
+                break
+            log.warning("RTSP not ready (attempt %d/30), retrying...",
+                        attempt + 1)
+            time.sleep(2)
+
+        if not self.cap or not self.cap.isOpened():
+            log.error("Failed to connect to RTSP stream: %s", self.rtsp_url)
             return
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        log.info("Camera opened: device=%s", self.device)
+        log.info("Connected to RTSP stream: %s", self.rtsp_url)
 
         while True:
             try:
                 ret, frame = self.cap.read()
                 if not ret:
-                    log.warning("Failed to read frame, retrying...")
-                    time.sleep(1)
+                    log.warning("Failed to read frame, reconnecting...")
+                    self.cap.release()
+                    time.sleep(2)
+                    self.cap = cv2.VideoCapture(self.rtsp_url)
                     continue
 
                 # Encode frame as JPEG bytes, then base64 for transport
@@ -117,7 +124,8 @@ class CameraSource(Source):
                 b64_frame = base64.b64encode(buf.tobytes()).decode("ascii")
 
                 ctx.emit({"frame": b64_frame, "camera_id": CAMERA_ID,
-                          "timestamp": datetime.utcnow().isoformat() + "Z"}, {})
+                          "timestamp": datetime.utcnow().isoformat() + "Z"},
+                         {})
 
                 time.sleep(self.interval)
             except Exception as e:
@@ -127,7 +135,7 @@ class CameraSource(Source):
     def close(self, ctx: Context):
         if self.cap and self.cap.isOpened():
             self.cap.release()
-            log.info("Camera released")
+            log.info("RTSP stream released")
 
 
 # AI Model Loading (lazy)
@@ -171,7 +179,7 @@ def _load_models():
         log.info("Loading PPE model: %s", ppe_path)
         ppe_model = YOLO(ppe_path)
     else:
-        log.warning("PPE model not found, using HSV color fallback for helmets")
+        log.warning("PPE model not found, using HSV color fallback")
 
     _models = {"base": base_model, "ppe": ppe_model}
     log.info("Models loaded successfully")
@@ -263,8 +271,8 @@ def _check_vest(crop):
         ([20, 150, 150], [40, 255, 255]),
     ]
     ratio = sum(
-        cv2.countNonZero(cv2.inRange(hsv, np.array(lo), np.array(hi))) / total
-        for lo, hi in ranges
+        cv2.countNonZero(cv2.inRange(hsv, np.array(lo), np.array(hi)))
+        / total for lo, hi in ranges
     )
     return ratio > 0.12, round(min(0.99, ratio * 6), 2)
 
@@ -290,7 +298,8 @@ def process_frame(frame_bytes):
         np.frombuffer(frame_bytes, np.uint8), cv2.IMREAD_COLOR
     )
     if frame is None:
-        return [{"event_type": "error", "severity": "none", "confidence": 0.0}]
+        return [{"event_type": "error", "severity": "none",
+                 "confidence": 0.0}]
 
     persons = _detect_persons(frame, models)
 
@@ -360,7 +369,8 @@ class PpeInference(Function):
             return process_frame(frame_bytes)
         except Exception as e:
             log.error("Inference error: %s", e, exc_info=True)
-            return [{"event_type": "error", "severity": "none", "error": str(e)}]
+            return [{"event_type": "error", "severity": "none",
+                     "error": str(e)}]
 
     def is_aggregate(self) -> bool:
         return False

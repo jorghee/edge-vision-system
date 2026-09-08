@@ -1,8 +1,8 @@
 version: "3.8"
 
-# eKuiper-native architecture: eKuiper captures video directly,
-# runs inference via Portable Plugin, and publishes alerts to MQTT.
-# The standalone Python detector is no longer used.
+# eKuiper-native architecture:
+#   MediaMTX captures CSI camera via libcamera -> RTSP stream
+#   eKuiper Portable Plugin reads RTSP, runs AI inference, publishes to MQTT
 
 networks:
   edge-net:
@@ -28,11 +28,28 @@ services:
     networks:
       - edge-net
 
+  # MediaMTX: RTSP server with native RPi camera support via libcamera.
+  # Exposes the CSI camera as an RTSP stream at rtsp://mediamtx:8554/cam
+  mediamtx:
+    image: bluenviron/mediamtx:1-rpi
+    container_name: mediamtx
+    restart: unless-stopped
+    privileged: true
+    tmpfs:
+      - /dev/shm:exec
+    volumes:
+      - /run/udev:/run/udev:ro
+    environment:
+      MTX_PATHS_CAM_SOURCE: "rpiCamera"
+      MTX_PATHS_CAM_RPICAMERAWIDTH: "640"
+      MTX_PATHS_CAM_RPICAMERAHEIGHT: "480"
+    networks:
+      - edge-net
+
   ekuiper:
     build: ./services/ekuiper
     container_name: ekuiper-engine
     restart: unless-stopped
-    privileged: true
     ports:
       - "9081:9081"
     environment:
@@ -41,8 +58,7 @@ services:
       MODELS_DIR: "/kuiper/models"
       CAMERA_ID: "cam-rpi-01"
       CONFIDENCE_THR: "0.45"
-    devices:
-      - "/dev/video0:/dev/video0"
+      RTSP_URL: "rtsp://mediamtx:8554/cam"
     volumes:
       - ekuiper-data:/kuiper/data
       - ekuiper-log:/kuiper/log
@@ -51,6 +67,7 @@ services:
       - ./infrastructure/ekuiper/sources/cameraSource.yaml:/kuiper/etc/sources/cameraSource.yaml
     depends_on:
       - mqtt
+      - mediamtx
     networks:
       - edge-net
 
