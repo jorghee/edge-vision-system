@@ -21,7 +21,7 @@ curl -s -X POST "${API_URL}/streams" \
   -H "Content-Type: application/json" \
   -d '{
     "sql": "CREATE STREAM video_frames () WITH (TYPE=\"video\", CONF_KEY=\"default\", FORMAT=\"binary\")"
-  }' > /dev/null
+  }'
 
 echo "[3/5] Creating PPE detection rule (critical alerts)..."
 curl -s -X POST "${API_URL}/rules" \
@@ -33,7 +33,7 @@ curl -s -X POST "${API_URL}/rules" \
       { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1 } },
       { "log": {} }
     ]
-  }' > /dev/null
+  }'
 
 echo "[4/5] Creating PPE detection rule (high alerts)..."
 curl -s -X POST "${API_URL}/rules" \
@@ -45,7 +45,7 @@ curl -s -X POST "${API_URL}/rules" \
       { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1 } },
       { "log": {} }
     ]
-  }' > /dev/null
+  }'
 
 echo "[5/5] Creating monitoring rule (all non-clear events)..."
 curl -s -X POST "${API_URL}/rules" \
@@ -56,6 +56,6 @@ curl -s -X POST "${API_URL}/rules" \
     "actions": [
       { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/monitor", "qos": 0 } }
     ]
-  }' > /dev/null
+  }'
 
 echo "[OK] eKuiper configuration completed (eKuiper-native pipeline)."
