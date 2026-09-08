@@ -55,6 +55,8 @@ services:
     environment:
       MQTT_SOURCE__DEFAULT__SERVER: "tcp://mqtt:1883"
       KUIPER__PORTABLE__PYTHON_BIN: "python3"
+      KUIPER__PORTABLE__INITTIMEOUT: "60000"
+      KUIPER__PORTABLE__SENDTIMEOUT: "60000"
       MODELS_DIR: "/kuiper/models"
       CAMERA_ID: "cam-rpi-01"
       CONFIDENCE_THR: "0.45"
