@@ -59,7 +59,7 @@ curl -s -X POST "${API_URL}/rules" \
     "id": "ppe_alert_critical",
     "sql": "SELECT * FROM camera_frames WHERE ppeInference(frame)->severity = '\''critical'\''",
     "actions": [
-      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1 } },
+      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1, "maxDiskCache": 10000, "bufferPageSize": 1, "resendInterval": 2000, "cleanCacheAtStop": false } },
       { "log": {} }
     ]
   }'
@@ -72,7 +72,7 @@ curl -s -X POST "${API_URL}/rules" \
     "id": "ppe_alert_high",
     "sql": "SELECT * FROM camera_frames WHERE ppeInference(frame)->severity = '\''high'\''",
     "actions": [
-      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1 } },
+      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/alerts", "qos": 1, "maxDiskCache": 10000, "bufferPageSize": 1, "resendInterval": 2000, "cleanCacheAtStop": false } },
       { "log": {} }
     ]
   }'
@@ -85,7 +85,7 @@ curl -s -X POST "${API_URL}/rules" \
     "id": "ppe_monitor",
     "sql": "SELECT * FROM camera_frames WHERE ppeInference(frame)->event_type != '\''clear'\''",
     "actions": [
-      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/monitor", "qos": 0 } }
+      { "mqtt": { "server": "tcp://mqtt:1883", "topic": "edge/monitor", "qos": 0, "maxDiskCache": 10000, "bufferPageSize": 1, "resendInterval": 2000, "cleanCacheAtStop": false } }
     ]
   }'
 echo ""
