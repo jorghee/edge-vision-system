@@ -296,5 +296,11 @@ class PpeInference(Function):
 
 
 if __name__ == '__main__':
-    from ekuiper import plugin
-    plugin.start(functions={"ppeInference": PpeInference})
+    from ekuiper.runtime.plugin import PluginConfig, start
+    c = PluginConfig(
+        name="ppe_inference",
+        sources={},
+        sinks={},
+        functions={"ppeInference": lambda: PpeInference()},
+    )
+    start(c)
