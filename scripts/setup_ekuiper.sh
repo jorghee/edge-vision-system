@@ -97,8 +97,8 @@ curl -s -X POST "${API_URL}/streams" \
 echo ""
 
 # Build MQTT sink config with authentication
-MQTT_SINK_ALERTS="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/alerts\",\"qos\":1,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
-MQTT_SINK_MONITOR="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/monitor\",\"qos\":0,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
+MQTT_SINK_ALERTS="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/alerts\",\"qos\":1,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"sendSingle\":true,\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
+MQTT_SINK_MONITOR="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/monitor\",\"qos\":0,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"sendSingle\":true,\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
 
 echo "[4/6] Creating PPE detection rule (critical alerts)..."
 create_rule "ppe_alert_critical" "{
