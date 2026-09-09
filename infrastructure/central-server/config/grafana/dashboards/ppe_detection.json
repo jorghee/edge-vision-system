@@ -3,46 +3,39 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "links": [],
+  "links": [
+    {
+      "icon": "dashboard",
+      "title": "Device Health",
+      "url": "/d/device-health-main",
+      "tooltip": "Ver observabilidad del dispositivo"
+    }
+  ],
   "panels": [
     {
-      "id": 1,
-      "title": "Eventos por Severidad (Últimas 24h)",
-      "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
-      "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-      "targets": [
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => r._field == \"confidence\")\n  |> group(columns: [\"severity\"])\n  |> count()\n  |> yield(name: \"count\")",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "displayName": "${__field.labels.severity}",
-          "color": { "mode": "palette-classic" }
-        },
-        "overrides": [
-          { "matcher": { "id": "byName", "options": "critical" }, "properties": [{ "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "high" }, "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] }
-        ]
-      }
+      "id": 100,
+      "title": "Resumen General",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
     },
     {
-      "id": 2,
+      "id": 1,
       "title": "Total de Alertas",
+      "description": "Cantidad total de eventos con severidad critical o high en el rango de tiempo seleccionado.",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "targets": [
         {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r.severity != \"none\")\n  |> filter(fn: (r) => r._field == \"confidence\")\n  |> count()\n  |> yield(name: \"total\")",
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => r._field == \"confidence\")\n  |> filter(fn: (r) => r.severity == \"critical\" or r.severity == \"high\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> group()\n  |> count()\n  |> yield(name: \"total\")",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "displayName": "Total",
+          "noValue": "0",
           "color": { "mode": "thresholds" },
           "thresholds": {
             "steps": [
@@ -52,99 +45,271 @@
             ]
           }
         }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
       }
     },
     {
-      "id": 3,
-      "title": "Alertas Críticas Hoy",
+      "id": 2,
+      "title": "Alertas Críticas",
+      "description": "Eventos con severidad critical (sin casco Y sin chaleco).",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "targets": [
         {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r.severity == \"critical\")\n  |> filter(fn: (r) => r._field == \"confidence\")\n  |> count()\n  |> yield(name: \"critical\")",
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => r._field == \"confidence\")\n  |> filter(fn: (r) => r.severity == \"critical\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> group()\n  |> count()\n  |> yield(name: \"critical\")",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "displayName": "Críticas",
+          "noValue": "0",
           "color": { "fixedColor": "#F2495C", "mode": "fixed" }
         }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
       }
     },
     {
-      "id": 4,
-      "title": "Confianza Promedio",
-      "type": "gauge",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "id": 3,
+      "title": "Alertas Altas",
+      "description": "Eventos con severidad high (sin casco O sin chaleco).",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "targets": [
         {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> mean()\n  |> yield(name: \"avg\")",
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => r._field == \"confidence\")\n  |> filter(fn: (r) => r.severity == \"high\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> group()\n  |> count()\n  |> yield(name: \"high\")",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "displayName": "Promedio",
+          "displayName": "Altas",
+          "noValue": "0",
+          "color": { "fixedColor": "#FF9830", "mode": "fixed" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Personas Detectadas (Promedio)",
+      "description": "Número promedio de personas en cuadro durante el rango seleccionado.",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
+      "targets": [
+        {
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => r._field == \"persons_detected\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> group()\n  |> mean()\n  |> yield(name: \"avg_persons\")",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "Prom. Personas",
+          "noValue": "0",
+          "decimals": 1,
+          "color": { "fixedColor": "#73BF69", "mode": "fixed" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Confianza Promedio",
+      "description": "Confianza promedio del modelo de IA en las detecciones del rango seleccionado.",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
+      "targets": [
+        {
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> group()\n  |> mean()\n  |> yield(name: \"avg\")",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "Confianza",
           "min": 0, "max": 1,
+          "decimals": 2,
           "thresholds": {
             "steps": [
               { "color": "red", "value": null },
-              { "color": "yellow", "value": 0.5 },
-              { "color": "green", "value": 0.7 }
+              { "color": "yellow", "value": 0.3 },
+              { "color": "green", "value": 0.6 }
             ]
           }
         }
       }
     },
     {
-      "id": 5,
+      "id": 6,
       "title": "Eventos por Dispositivo",
+      "description": "Total de alertas agrupadas por cámara.",
       "type": "barchart",
-      "gridPos": { "h": 8, "w": 4, "x": 20, "y": 0 },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "targets": [
         {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> group(columns: [\"camera_id\"])\n  |> count()\n  |> yield(name: \"by_device\")",
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> filter(fn: (r) => r.severity == \"critical\" or r.severity == \"high\")\n  |> group(columns: [\"camera_id\"])\n  |> count()\n  |> yield(name: \"by_device\")",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "displayName": "${__field.labels.camera_id}"
+          "displayName": "${__field.labels.camera_id}",
+          "color": { "mode": "palette-classic" }
         }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always"
       }
     },
     {
-      "id": 6,
-      "title": "Timeline de Detecciones",
-      "type": "timeseries",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
-      "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
-      "targets": [
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> aggregateWindow(every: 5m, fn: count, createEmpty: true)\n  |> yield(name: \"events\")",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "displayName": "Detecciones",
-          "custom": { "drawStyle": "bars", "fillOpacity": 50 }
-        }
-      }
+      "id": 200,
+      "title": "Análisis Temporal",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
     },
     {
       "id": 7,
-      "title": "Eventos Recientes (Detalle)",
-      "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 18 },
+      "title": "Timeline de Detecciones por Severidad",
+      "description": "Evolución temporal de eventos agrupados por severidad. Permite identificar picos de incidencia y patrones horarios.",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 7 },
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "targets": [
         {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_measurement\", \"host\", \"mqtt_topic\"])\n  |> map(fn: (r) => ({ r with snapshot: if exists r.snapshot then \"data:image/jpeg;base64,\" + r.snapshot else \"\" }))\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 50)\n  |> yield(name: \"recent\")",
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> filter(fn: (r) => r.severity == \"critical\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> aggregateWindow(every: v.windowPeriod, fn: count, createEmpty: true)\n  |> yield(name: \"critical\")",
+          "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> filter(fn: (r) => r.severity == \"high\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> aggregateWindow(every: v.windowPeriod, fn: count, createEmpty: true)\n  |> yield(name: \"high\")",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "stacking": { "mode": "normal", "group": "A" },
+            "barAlignment": 0,
+            "lineWidth": 0,
+            "pointSize": 5
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byFrameRefID", "options": "A" },
+            "properties": [
+              { "id": "displayName", "value": "Critical" },
+              { "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byFrameRefID", "options": "B" },
+            "properties": [
+              { "id": "displayName", "value": "High" },
+              { "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["sum"] }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Distribución por Tipo de Infracción",
+      "description": "Proporción de infracciones por tipo: sin chaleco, sin casco, sin ambos.",
+      "type": "piechart",
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 7 },
+      "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
+      "targets": [
+        {
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => r._field == \"confidence\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> group(columns: [\"event_type\"])\n  |> count()\n  |> yield(name: \"by_type\")",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.event_type}",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "no_helmet_no_vest" },
+            "properties": [
+              { "id": "displayName", "value": "Sin Casco + Sin Chaleco" },
+              { "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "no_vest" },
+            "properties": [
+              { "id": "displayName", "value": "Sin Chaleco" },
+              { "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "no_helmet" },
+            "properties": [
+              { "id": "displayName", "value": "Sin Casco" },
+              { "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] },
+        "pieType": "donut",
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "id": 300,
+      "title": "Eventos Recientes (Detalle)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "collapsed": false
+    },
+    {
+      "id": 9,
+      "title": "Últimos Eventos Detectados",
+      "description": "Tabla detallada con los eventos más recientes. Incluye snapshots de la cámara cuando estén disponibles.",
+      "type": "table",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 18 },
+      "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
+      "targets": [
+        {
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_measurement\", \"host\", \"mqtt_topic\", \"timestamp\"])\n  |> map(fn: (r) => ({ r with snapshot: if exists r.snapshot then \"data:image/jpeg;base64,\" + r.snapshot else \"\" }))\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 100)\n  |> yield(name: \"recent\")",
           "refId": "A"
         }
       ],
@@ -152,13 +317,138 @@
         "defaults": {},
         "overrides": [
           {
+            "matcher": { "id": "byName", "options": "_time" },
+            "properties": [
+              { "id": "displayName", "value": "Hora" },
+              { "id": "custom.width", "value": 180 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "severity" },
+            "properties": [
+              { "id": "displayName", "value": "Severidad" },
+              { "id": "custom.width", "value": 90 },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "critical": { "text": "CRÍTICA", "color": "#F2495C" } } },
+                { "type": "value", "options": { "high": { "text": "ALTA", "color": "#FF9830" } } }
+              ]}
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "event_type" },
+            "properties": [
+              { "id": "displayName", "value": "Tipo Infracción" },
+              { "id": "custom.width", "value": 160 },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "no_vest": { "text": "Sin Chaleco" } } },
+                { "type": "value", "options": { "no_helmet": { "text": "Sin Casco" } } },
+                { "type": "value", "options": { "no_helmet_no_vest": { "text": "Sin Casco + Chaleco" } } }
+              ]}
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "confidence" },
+            "properties": [
+              { "id": "displayName", "value": "Confianza" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "camera_id" },
+            "properties": [
+              { "id": "displayName", "value": "Cámara" },
+              { "id": "custom.width", "value": 110 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "helmet_detected" },
+            "properties": [
+              { "id": "displayName", "value": "Casco" },
+              { "id": "custom.width", "value": 70 },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "true": { "text": "Si" } } },
+                { "type": "value", "options": { "false": { "text": "No" } } }
+              ]}
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "vest_detected" },
+            "properties": [
+              { "id": "displayName", "value": "Chaleco" },
+              { "id": "custom.width", "value": 70 },
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "true": { "text": "Si" } } },
+                { "type": "value", "options": { "false": { "text": "No" } } }
+              ]}
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "persons_detected" },
+            "properties": [
+              { "id": "displayName", "value": "Personas" },
+              { "id": "custom.width", "value": 80 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "helmet_confidence" },
+            "properties": [
+              { "id": "displayName", "value": "Conf. Casco" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.width", "value": 95 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "vest_confidence" },
+            "properties": [
+              { "id": "displayName", "value": "Conf. Chaleco" },
+              { "id": "decimals", "value": 2 },
+              { "id": "custom.width", "value": 100 }
+            ]
+          },
+          {
             "matcher": { "id": "byName", "options": "snapshot" },
             "properties": [
-              { "id": "custom.cellOptions", "value": { "type": "image" } }
+              { "id": "displayName", "value": "Captura" },
+              { "id": "custom.cellOptions", "value": { "type": "image" } },
+              { "id": "custom.width", "value": 200 }
             ]
           }
         ]
-      }
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Hora", "desc": true }],
+        "footer": { "show": true, "countRows": true, "reducer": ["count"] }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "_time": 0,
+              "severity": 1,
+              "event_type": 2,
+              "camera_id": 3,
+              "confidence": 4,
+              "helmet_detected": 5,
+              "vest_detected": 6,
+              "persons_detected": 7,
+              "helmet_confidence": 8,
+              "vest_confidence": 9,
+              "snapshot": 10
+            }
+          }
+        }
+      ]
     }
   ],
   "refresh": "10s",
@@ -171,6 +461,18 @@
         "type": "datasource",
         "query": "influxdb",
         "current": { "text": "InfluxDB", "value": "InfluxDB" }
+      },
+      {
+        "name": "camera_id",
+        "label": "Dispositivo",
+        "type": "query",
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"edge-data\", tag: \"camera_id\", predicate: (r) => r._measurement == \"ppe_events\")",
+        "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
+        "refresh": 2,
+        "multi": false,
+        "includeAll": true,
+        "allValue": "All",
+        "current": { "text": "All", "value": "$__all" }
       }
     ]
   },
