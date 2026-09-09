@@ -19,6 +19,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "displayName": "${__field.labels.severity}",
           "color": { "mode": "palette-classic" }
         },
         "overrides": [
@@ -41,6 +42,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "displayName": "Total",
           "color": { "mode": "thresholds" },
           "thresholds": {
             "steps": [
@@ -66,6 +68,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "displayName": "Críticas",
           "color": { "fixedColor": "#F2495C", "mode": "fixed" }
         }
       }
@@ -84,6 +87,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "displayName": "Promedio",
           "min": 0, "max": 1,
           "thresholds": {
             "steps": [
@@ -106,7 +110,12 @@
           "query": "from(bucket: \"edge-data\")\n  |> range(start: -24h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\" and r._field == \"confidence\")\n  |> group(columns: [\"camera_id\"])\n  |> count()\n  |> yield(name: \"by_device\")",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.camera_id}"
+        }
+      }
     },
     {
       "id": 6,
@@ -122,6 +131,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "displayName": "Detecciones",
           "custom": { "drawStyle": "bars", "fillOpacity": 50 }
         }
       }
@@ -134,10 +144,21 @@
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "targets": [
         {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => r._field == \"confidence\" or r._field == \"persons_detected\")\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 50)\n  |> yield(name: \"recent\")",
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_measurement\", \"host\", \"mqtt_topic\"])\n  |> map(fn: (r) => ({ r with snapshot: if exists r.snapshot then \"data:image/jpeg;base64,\" + r.snapshot else \"\" }))\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 50)\n  |> yield(name: \"recent\")",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "snapshot" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "image" } }
+            ]
+          }
+        ]
+      }
     }
   ],
   "refresh": "10s",
