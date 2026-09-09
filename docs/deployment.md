@@ -1,136 +1,83 @@
-# Configuration and Deployment
+# Despliegue y Configuración
 
-All services run in Docker. eKuiper captures video directly from the camera device and performs AI inference internally via a Portable Python Plugin.
+El despliegue de este sistema debe abordarse en dos fases físicas diferenciadas: primero se debe aprovisionar el **Servidor Central** (para que exista un destino hacia donde enviar la información), y posteriormente se despliegan los **Dispositivos Edge**.
 
-## Prerequisites
+Todas las dependencias están empaquetadas en contenedores Docker, garantizando un despliegue predecible independientemente del sistema operativo base.
 
-| Requirement | Laptop | Raspberry Pi |
-| :--- | :--- | :--- |
-| Docker & Docker Compose | Required | Required |
-| Git | Required | Required |
-| Python 3.11+ | For model export only | Not needed |
-| USB/CSI Camera | `/dev/video2` (default) | `/dev/video0` (default) |
+## 1. Servidor Central
 
----
+El Servidor Central puede ser una máquina local, un servidor on-premise, o una instancia en la nube (AWS EC2, Google Cloud Compute Engine). Solo requiere Linux y Docker.
 
-## 1. Laptop Deployment (x86_64)
+### Componentes que levanta:
+- Broker MQTT (Mosquitto)
+- Base de datos (InfluxDB)
+- Colector (Telegraf)
+- Dashboards (Grafana)
 
-### Automated Execution
+### Pasos de Despliegue:
 
-```bash
-bash scripts/start_laptop.sh
-```
+1. Ingresar al directorio del servidor central:
+   ```bash
+   cd infrastructure/central-server
+   ```
+2. (Opcional) Ajustar el archivo `.env` si se requiere modificar los puertos por defecto, el token de InfluxDB, o las credenciales de Grafana.
+3. Levantar la infraestructura en segundo plano:
+   ```bash
+   docker compose -f docker-compose.server.yml up -d
+   ```
+4. Verificar que todos los servicios estén operacionales:
+   ```bash
+   docker ps
+   ```
 
-This script builds and starts all Docker services, waits for eKuiper, and provisions the video stream and SQL rules.
-
-### Monitoring
-
-```bash
-docker exec mqtt-broker mosquitto_sub -t "edge/alerts" -v    # filtered alerts
-docker exec mqtt-broker mosquitto_sub -t "edge/monitor" -v   # all non-clear events
-```
-
-### Stopping
-
-```bash
-docker compose down
-```
-
-> [!NOTE]
-> The USB webcam is mapped as `/dev/video2` by default. Adjust `devices` in `docker-compose.yml` and `url` in `infrastructure/ekuiper/sources/video.yaml` to match your hardware.
+A partir de este momento, Grafana está disponible en `http://<IP_DEL_SERVIDOR>:3000` (usuario `admin`, clave `admin` por defecto) y el Broker MQTT está esperando conexiones en el puerto `1883`.
 
 ---
 
-## 2. Raspberry Pi Deployment (ARM64)
+## 2. Dispositivo Edge (Ej. Raspberry Pi)
 
-### Automated Deployment (from laptop)
+El dispositivo en el borde requiere tener conectada físicamente una cámara (ya sea por USB o módulo CSI compatible con V4L2) y acceso a red para alcanzar al Servidor Central.
 
-```bash
-bash scripts/deploy.sh
-```
+> [!IMPORTANT]
+> Antes de desplegar el Edge Device, asegúrese de tener la dirección IP o dominio del Servidor Central.
 
-| Step | Action | Device |
-| :--- | :--- | :--- |
-| 1 | Download YOLO models, export to TFLite + NCNN | Laptop |
-| 2 | Push local commits to remote | Laptop |
-| 3 | Verify SSH connectivity | Laptop → RPi |
-| 4 | Install Git and Docker | RPi |
-| 5 | Clone/pull repository | RPi |
-| 6 | Transfer models | Laptop → RPi |
-| 7 | Start all services (docker compose) | RPi |
+### Componentes que levanta:
+- Servidor RTSP Local (MediaMTX)
+- Motor de Procesamiento y Reglas (eKuiper)
+- Script de Telemetría (Node Agent)
 
-### Manual Deployment
+### Pasos de Despliegue (Automatizado mediante Script):
 
-#### a. Prepare models on the laptop
+El proyecto incluye un script robusto que automatiza la instalación completa. Copie el repositorio a la Raspberry Pi y ejecute:
 
-```bash
-bash scripts/prepare_models.sh
-```
+1. Ejecutar el script principal indicando la URL MQTT del servidor central:
+   ```bash
+   bash scripts/deploy_edge.sh "tcp://<IP_DEL_SERVIDOR_CENTRAL>:1883"
+   ```
 
-#### b. Transfer models to RPi
+### ¿Qué hace el script `deploy_edge.sh` por debajo?
 
-```bash
-scp -r services/detector/models/* pi@<RPI_IP>:~/edge-vision-system/services/detector/models/
-```
+Si desea desplegar manualmente o requiere auditar el script, estos son los pasos internos que ejecuta:
 
-#### c. Start the system on RPi
+1. **Gestión de variables:** Inserta la IP del Servidor Central en el archivo `infrastructure/edge-device/.env` bajo la variable `MQTT_SERVER_URL`.
+2. **Levantamiento Docker:** Ejecuta `docker compose -f infrastructure/edge-device/docker-compose.device.yml up -d` para iniciar MediaMTX, eKuiper y el Node Agent.
+3. **Conversión de Modelos:** Si eKuiper arranca correctamente, ejecuta `scripts/prepare_models.sh` para asegurar que el modelo YOLOv8 crudo (.pt) se convierta y esté disponible en formato TFLite o NCNN (requeridos para eKuiper).
+4. **Aprovisionamiento de eKuiper:** Ejecuta `scripts/setup_ekuiper.sh`, el cual interactúa con la API REST de eKuiper para inyectar, en este orden:
+   - El plugin portable en Python (`ppe_inference`).
+   - El stream origen conectado a MediaMTX (`camera_frames`).
+   - Las reglas SQL que vinculan el stream con el plugin y configuran las salidas hacia MQTT.
 
-```bash
-cd ~/edge-vision-system
-bash scripts/start_rpi.sh
-```
+> [!WARNING]
+> La cámara física debe estar disponible en la ruta `/dev/video0`. Si su cámara se monta en un path distinto (ej. `/dev/video2`), modifique el valor `CAM_DEVICE` en el archivo `infrastructure/edge-device/.env` antes de ejecutar el script.
 
 ---
 
-## Model Conversion
+## 3. Simulación Local (Modo Desarrollo)
 
-The Portable Plugin supports TFLite, ONNX, and PT formats. TFLite is the primary format for eKuiper compatibility.
+Si usted no posee una Raspberry Pi y desea **simular el sistema completo** directamente en su Laptop (x86_64) para motivos de desarrollo o depuración, puede desplegar ambos lados simultáneamente.
 
-```bash
-cd services/detector/scripts
-python3 export_model.py --base ../models/yolov8n.pt --format tflite
-python3 export_model.py --base ../models/ppe_detector.pt --format tflite
-```
-
-> [!TIP]
-> `prepare_models.sh` automates download + TFLite + NCNN export. It is idempotent.
-
----
-
-## eKuiper Configuration
-
-### Video Source
-
-Configuration file: `infrastructure/ekuiper/sources/video.yaml`
-
-```yaml
-default:
-  url: /dev/video0       # Camera device path
-  interval: 3000         # Milliseconds between captures
-  codec: mjpeg
-```
-
-### Rules Provisioning
-
-```bash
-bash scripts/setup_ekuiper.sh
-```
-
-Verify:
-```bash
-curl -s http://localhost:9081/rules | python3 -m json.tool
-curl -s http://localhost:9081/streams | python3 -m json.tool
-```
-
----
-
-## Troubleshooting
-
-| Problem | Cause | Solution |
-| :--- | :--- | :--- |
-| `No base YOLO model found` | Models not transferred to RPi | Run `deploy.sh` or `scp` models manually |
-| eKuiper container won't start | Device `/dev/video0` not found | Check camera connection, update `video.yaml` |
-| No alerts appearing | Plugin not loaded | Check `docker logs ekuiper-engine` for Python errors |
-| `docker: permission denied` | User not in docker group | `sudo usermod -aG docker $USER` then re-login |
-| Low inference accuracy | INT8 quantization in TFLite | Try `--format onnx` for FP32 precision |
-| CSI camera not detected in Docker | libcamera not V4L2-compatible | Install `rpicam-v4l2` shim or use `privileged: true` |
+1. Ejecute el script de simulación:
+   ```bash
+   bash scripts/start_simulation.sh
+   ```
+Este script levantará una arquitectura combinada (`infrastructure/local-simulation`) que fusiona los componentes centrales y los del borde en una única red de Docker local, utilizando la webcam conectada a su computadora como origen de datos.

@@ -1,92 +1,88 @@
-# Architecture and Data Flow
+# Arquitectura del Sistema
 
-The Edge Vision System uses an **eKuiper-native architecture** where the rules engine is the primary actor. eKuiper captures video frames directly from the camera, runs AI inference through a Portable Python Plugin, and publishes only filtered alerts to MQTT.
+El Edge Vision System está diseñado bajo un paradigma **Edge-First**, separando estrictamente la adquisición y el procesamiento pesado de datos (en el borde) del almacenamiento a largo plazo y la analítica (en el servidor central).
 
-## Architecture Diagram
+Esta separación garantiza que el sistema sea resiliente a caídas de red, escalable a cientos de dispositivos, y extremadamente eficiente en el uso del ancho de banda.
+
+## Diagrama de Arquitectura Global
+
+El siguiente diagrama muestra la topología completa del sistema y la separación de responsabilidades:
 
 ```mermaid
 graph TD
-    subgraph "Edge Device (Raspberry Pi 4 / Laptop)"
-        CAM["/dev/video0<br/>(USB / CSI Camera)"] -.->|"V4L2 device"| VS
-
-        subgraph eKuiper["eKuiper Engine"]
-            VS["Video Source Plugin<br/>(frame capture via ffmpeg)"]
-            PP["Portable Python Plugin<br/>(ppeInference)"]
-            SQL["SQL Rules Engine"]
-
-            VS -->|"binary frames"| PP
-            PP -->|"JSON detections"| SQL
+    subgraph "Edge Network (Múltiples Dispositivos, ej. Raspberry Pi)"
+        CAM["/dev/video0<br/>(Cámara USB/CSI)"] -.->|"V4L2"| MMTX["MediaMTX<br/>(Streaming Server)"]
+        
+        subgraph "eKuiper Engine (Procesamiento Datos)"
+            VS["Video Source Plugin<br/>(Captura frames RTSP)"]
+            PP["Portable Python Plugin<br/>(YOLOv8 + Análisis PPE)"]
+            SQL["Motor SQL<br/>(Filtrado y Agregación)"]
+            
+            VS -->|"frames binarios"| PP
+            PP -->|"JSON Detecciones"| SQL
         end
-
-        SQL -->|"MQTT Sink<br/>(edge/alerts)"| MQTT["Mosquitto"]
-        SQL -->|"MQTT Sink<br/>(edge/monitor)"| MQTT
-        MQTT --> ACT["Action Service"]
-        ACT -->|"edge/actions"| MQTT
-
-        HM["Health Monitor"] -->|"edge/health"| MQTT
+        
+        MMTX -.->|"rtsp://.../camera"| VS
+        
+        NA["Node Agent<br/>(Monitor Salud)"]
     end
+
+    subgraph "Central Server (Local o Nube)"
+        MQTT["Mosquitto<br/>(Broker MQTT)"]
+        TLG["Telegraf<br/>(Colector/Traductor)"]
+        DB[("InfluxDB<br/>(Time-Series DB)")]
+        GF["Grafana<br/>(Dashboards)"]
+        
+        MQTT -->|"Suscripción"| TLG
+        TLG -->|"Line Protocol API"| DB
+        GF -->|"Flux Queries"| DB
+    end
+
+    SQL -->|"Publicación MQTT<br/>(edge/alerts, edge/monitor)"| MQTT
+    NA -->|"Publicación MQTT<br/>(edge/metrics/#)"| MQTT
 ```
 
-## Data Flow
+---
 
-### 1. Frame Capture (eKuiper Video Source)
+## Separación de Responsabilidades
 
-eKuiper's [Video Source Plugin](https://ekuiper.org/docs/en/latest/guide/sources/plugin/video.html) captures frames from the local camera device at a configurable interval (default: 3 seconds). The plugin uses ffmpeg internally and produces binary frame data.
+### 1. El Borde (Edge Device)
 
-Configuration: [`infrastructure/ekuiper/sources/video.yaml`](file:///home/george/George/I_programmer/Projects/edge-vision-system/infrastructure/ekuiper/sources/video.yaml)
+El dispositivo edge (usualmente una Raspberry Pi 4) es responsable de las operaciones más intensivas en cómputo. Su objetivo es evitar que los datos crudos salgan del dispositivo.
 
-### 2. AI Inference (Portable Python Plugin)
+*   **Adquisición de Video (MediaMTX):** Se conecta a la cámara física (`/dev/video0`) y levanta un servidor RTSP/WebRTC local. Esto permite que múltiples servicios locales (como eKuiper) consuman el flujo sin bloquear el hardware de la cámara, e incluso permite a un operador visualizar la cámara remotamente para depuración.
+*   **Procesamiento y Filtrado (eKuiper):** Es el corazón del dispositivo. Extrae frames del servidor RTSP, los envía a un modelo de IA nativo (Portable Plugin con YOLOv8), evalúa las detecciones y aplica reglas SQL para decidir qué eventos ameritan ser enviados por la red.
+*   **Observabilidad Local (Node Agent):** Un script ultra-ligero en Python que monitorea el estado del hardware (CPU, RAM, temperatura para evitar throttling) y el estado del contenedor de eKuiper, enviando latidos de vida (heartbeats) constantes.
 
-The `ppeInference` function ([`services/ekuiper/plugins/ppe_inference/ppe_func.py`](file:///home/george/George/I_programmer/Projects/edge-vision-system/services/ekuiper/plugins/ppe_inference/ppe_func.py)) receives raw frame bytes and executes:
+### 2. El Servidor Central (Central Server)
 
-| Step | Operation | Output |
-|:---|:---|:---|
-| Person detection | YOLOv8 (class 0 only) | Bounding boxes |
-| Per-person crop | Frame slicing | Person images |
-| Helmet check | PPE model or HSV fallback | detected, confidence |
-| Vest check | HSV color segmentation | detected, confidence |
-| Severity classification | Logic rules | event_type, severity |
+El servidor central actúa como el agregador pasivo de todos los dispositivos de la red. Requiere de capacidades de almacenamiento y memoria para consolidar el historial operativo.
 
-The plugin returns a list of detection results (JSON) per frame.
+*   **Transporte (Mosquitto):** Actúa como el embudo de entrada. Recibe mensajes MQTT ligeros asíncronamente desde todos los dispositivos Edge. No procesa la información, solo la distribuye.
+*   **Traducción e Ingesta (Telegraf):** Se suscribe a los tópicos MQTT. Toma el JSON estructurado emitido por eKuiper y Node Agent, lo formatea correctamente utilizando etiquetas (`tags`) y valores (`fields`), y lo inserta masivamente en InfluxDB mediante el InfluxDB Line Protocol.
+*   **Almacenamiento (InfluxDB):** Base de datos optimizada para series de tiempo. Almacena dos grandes conjuntos de datos (`measurements`): los eventos de negocio (`ppe_events`) y las métricas de telemetría de los dispositivos (`device_metrics`).
+*   **Visualización (Grafana):** La interfaz de usuario final. Permite a los operadores monitorear el estado de toda la red de dispositivos y auditar las detecciones de inteligencia artificial a través de dashboards interactivos.
 
-### 3. SQL Filtering (eKuiper Rules)
+---
 
-eKuiper rules filter the detections and route them:
+## Flujo de Datos y Justificación Edge-First
 
-| Rule | Condition | Output Topic |
-|:---|:---|:---|
-| `ppe_alert_critical` | `severity = 'critical'` | `edge/alerts` |
-| `ppe_alert_high` | `severity = 'high'` | `edge/alerts` |
-| `ppe_monitor` | `event_type != 'clear'` | `edge/monitor` |
+Para entender el valor de esta arquitectura, analicemos cómo se transforma el dato:
 
-### 4. Action Execution (Action Service)
+1.  **Dato Crudo:** La cámara genera video a 30 FPS. Enviar esto a la nube requeriría **~5 Mbps constantes** por cámara.
+2.  **Muestreo:** eKuiper captura 1 frame por segundo.
+3.  **Inferencia:** El plugin de Python procesa el frame con YOLOv8. Si detecta una persona, evalúa colores y contornos para determinar si lleva casco y chaleco.
+4.  **Dato Estructurado:** El frame de 5 MB se convierte en un JSON de 2 KB:
+    ```json
+    {
+      "camera_id": "cam-rpi-01",
+      "event_type": "no_vest",
+      "severity": "high",
+      "confidence": 0.85
+    }
+    ```
+5.  **Filtrado SQL:** eKuiper evalúa la severidad mediante reglas SQL. Si no hay personas, o si tienen su equipo correcto, **el dato se descarta localmente**.
+6.  **Transmisión:** Solo las infracciones se envían por MQTT.
+7.  **Caching (Resiliencia):** Si la red WiFi de la mina o fábrica se cae, eKuiper y MQTT actúan como buffers. Guardan los eventos críticos y los despachan automáticamente cuando la conexión se restablece.
 
-The action service subscribes to `edge/alerts`, logs the alert, and publishes response recommendations to `edge/actions`.
-
-## MQTT Topic Map
-
-| Topic | Publisher | Subscriber | Payload |
-|:---|:---|:---|:---|
-| `edge/alerts` | eKuiper (sink) | Action Service | Filtered critical/high alerts (JSON) |
-| `edge/actions` | Action Service | External systems | Response recommendations |
-| `edge/monitor` | eKuiper (sink) | Dashboards | All non-clear events |
-| `edge/health` | Health Monitor | eKuiper / Dashboards | CPU, RAM, temperature |
-
-## Key Design Decision: Why eKuiper-Native?
-
-| Aspect | Previous (Python Detector) | Current (eKuiper-Native) |
-|:---|:---|:---|
-| Camera access | Python holds device exclusively | eKuiper Video Source (inside Docker) |
-| Inference runtime | Python + PyTorch/NCNN (~400 MB RAM) | Portable Plugin (shared eKuiper process) |
-| MQTT load | Every event published to broker | Only filtered alerts reach MQTT |
-| Serialization | JSON encode → TCP → decode per frame | In-memory data between plugin and SQL |
-| Docker consistency | Detector runs natively (outside Docker) | All services containerized |
-
-## Deployment Model
-
-| Component | Laptop (x86_64) | Raspberry Pi (ARM64) |
-|:---|:---|:---|
-| MQTT Broker | Docker container | Docker container |
-| eKuiper + Plugin | Docker container (privileged) | Docker container (privileged) |
-| Action Service | Docker container | Docker container |
-| Health Monitor | Optional | Native sidecar |
+**Resultado:** Una reducción del ancho de banda del **99.9%**, permitiendo escalar a cientos de cámaras sobre redes 4G inestables o de bajo ancho de banda.

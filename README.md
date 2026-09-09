@@ -1,119 +1,77 @@
-# Edge Vision System
+# Edge Vision System: Plataforma de Datos IoT & Edge Computing
 
-Sistema de visión artificial para Edge Computing que procesa video localmente en dispositivos IoT (Raspberry Pi 4) mediante YOLOv8 para detectar personas y verificar el uso de Equipos de Protección Personal (EPP: casco y chaleco).
+Este proyecto es una **Infraestructura de Ingeniería de Datos para entornos Edge e IoT**, diseñada para gestionar, procesar y transportar eficientemente grandes volúmenes de datos generados en el borde de la red. 
 
-## Objetivo
+Como **caso de uso demostrativo**, el sistema implementa un modelo de Inteligencia Artificial (YOLOv8) para la **Detección de Equipos de Protección Personal (EPP)**, evaluando en tiempo real si los trabajadores portan casco y chaleco de seguridad. 
 
-Eliminar la transmisión constante de video hacia la nube. El sistema filtra inteligentemente en el borde y transmite únicamente alertas estructuradas en JSON ante eventos críticos, minimizando el consumo de ancho de banda.
+Sin embargo, el núcleo tecnológico del proyecto no es el modelo de IA en sí, sino la **arquitectura distribuida** que permite que este procesamiento ocurra de forma eficiente en dispositivos de bajos recursos (ej. Raspberry Pi 4) sin saturar el ancho de banda hacia un servidor central.
 
-## Arquitectura
+## Propósito Fundamental
 
-El sistema implementa una arquitectura **eKuiper-nativa** donde el motor de reglas es el actor principal del pipeline:
+En implementaciones industriales reales (minería, manufactura, construcción), enviar secuencias de video continuo a la nube para su procesamiento es insostenible debido a los costos de red, la latencia y la intermitencia de la conexión.
+
+Este proyecto resuelve ese desafío implementando un paradigma **Edge-First**:
+
+1. **Procesamiento Distribuido Local:** Los datos pesados (video) son adquiridos, analizados y descartados localmente dentro de cada dispositivo Edge.
+2. **Filtrado Inteligente:** Solo los eventos estructurados (alertas y métricas en formato JSON ligero) se envían a través de la red, reduciendo el consumo de ancho de banda en más de un 99%.
+3. **Transporte Resiliente:** Se utiliza mensajería MQTT para enviar los eventos estructurados de forma confiable al servidor central.
+4. **Observabilidad Centralizada:** Todos los eventos y métricas de salud (CPU, RAM, temperatura) de los múltiples dispositivos se consolidan en InfluxDB y se analizan dinámicamente mediante Grafana.
+
+## Arquitectura de Alto Nivel
+
+El sistema se divide físicamente en dos componentes principales: la red de dispositivos perimetrales (Edge Devices) y el cerebro centralizador (Central Server).
 
 ```mermaid
-graph TD
-    CAM["/dev/video0"] -->|V4L2| EK_VS["eKuiper Video Source"]
-    EK_VS -->|frames| EK_PP["Portable Plugin<br/>(YOLOv8 + PPE)"]
-    EK_PP -->|detections| EK_SQL["SQL Rules"]
-    EK_SQL -->|"edge/alerts"| MQTT["Mosquitto"]
-    MQTT --> ACT["Action Service"]
-    HM["Health Monitor"] -->|"edge/health"| MQTT
-```
+graph LR
+    subgraph "Edge Network (Múltiples Dispositivos)"
+        ED1[Raspberry Pi 4<br/>(Edge Device 1)]
+        ED2[Dispositivo N<br/>(Edge Device N)]
+    end
+    
+    subgraph "Central Server (Local o Nube)"
+        MQTT[Mosquitto<br/>Broker MQTT]
+        TLG[Telegraf<br/>Data Collector]
+        DB[(InfluxDB<br/>Time-Series)]
+        GF[Grafana<br/>Dashboards]
+    end
 
-| Componente | Función | Tecnología |
-| :--- | :--- | :--- |
-| **eKuiper** | Captura de video, inferencia IA, filtrado SQL, publicación de alertas | Go + Portable Python Plugin |
-| **Portable Plugin** | Detección de personas (YOLOv8), análisis de EPP (modelo + HSV) | Python, Ultralytics, OpenCV |
-| **Broker MQTT** | Sink para alertas filtradas, bus entre servicios | Eclipse Mosquitto |
-| **Action Service** | Respuesta reactiva ante alertas | Python, Paho MQTT |
-| **Health Monitor** | Telemetría del dispositivo (CPU, RAM, temperatura, throttling) | Python |
+    ED1 -- "Eventos JSON (MQTT)" --> MQTT
+    ED2 -- "Eventos JSON (MQTT)" --> MQTT
+    
+    MQTT --> TLG
+    TLG --> DB
+    DB --> GF
+```
 
 > [!NOTE]
-> La arquitectura completa y el flujo de datos están documentados en [docs/architecture.md](docs/architecture.md).
+> Para una explicación técnica detallada del flujo interno, consulta [Arquitectura del Sistema](docs/architecture.md).
 
-## Estructura del Proyecto
+## Casos de Uso y Aplicabilidad
 
-```
-edge-vision-system/
-├── services/
-│   ├── ekuiper/
-│   │   └── plugins/
-│   │       └── ppe_inference/        # Portable Plugin (inferencia IA)
-│   │           ├── ppe_func.py       # YOLOv8 + PPE analysis
-│   │           ├── ppe_inference.json # Plugin metadata
-│   │           └── requirements.txt
-│   ├── action_service/               # Servicio de respuesta a alertas
-│   │   ├── src/action_service.py
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   └── detector/                     # Legacy (models + export scripts)
-│       ├── models/                   # YOLOv8 models (TFLite/NCNN/PT)
-│       ├── scripts/                  # download_model.py, export_model.py
-│       └── src/                      # Archived: detector.py, camera.py
-├── infrastructure/
-│   ├── mqtt/config/                  # mosquitto.conf
-│   └── ekuiper/sources/             # video.yaml (Video Source config)
-├── scripts/                          # Deployment automation
-│   ├── deploy.sh                     # Full laptop → RPi deployment
-│   ├── prepare_models.sh             # Download + TFLite/NCNN export
-│   ├── setup_ekuiper.sh              # Video stream + SQL rules
-│   ├── start_laptop.sh               # Local execution
-│   └── start_rpi.sh                  # RPi execution
-├── docs/                             # Technical documentation
-├── docker-compose.yml                # x86_64 orchestration
-└── docker-compose.rpi.yml            # ARM64 orchestration (RPi)
-```
+Aunque la implementación actual está configurada para el monitoreo de **Equipos de Protección Personal (EPP)**, la infraestructura de datos es agnóstica. Este patrón arquitectónico (Streaming Local → IA en el Borde → Reglas SQL → MQTT → Time-Series DB) puede extrapolarse a sectores intensivos en datos:
 
-## Despliegue en Raspberry Pi 4
-
-Todos los servicios corren en Docker. eKuiper captura video directamente del dispositivo V4L2 y ejecuta la inferencia internamente.
-
-### Despliegue automatizado (desde la laptop)
-
-```bash
-bash scripts/deploy.sh
-```
-
-| Paso | Acción | Equipo |
-| :--- | :--- | :--- |
-| 1 | Descarga modelos YOLOv8, exporta a TFLite y NCNN | Laptop |
-| 2 | Push de commits al remoto | Laptop |
-| 3 | Instalación de Git y Docker | RPi (SSH) |
-| 4 | Clone/pull del repositorio | RPi (SSH) |
-| 5 | Transferencia de modelos | Laptop → RPi |
-| 6 | Levantamiento del sistema | RPi (SSH) |
-
-> [!TIP]
-> Para despliegue manual y troubleshooting, consultar [docs/deployment.md](docs/deployment.md).
-
-## Entorno de Desarrollo (x86_64)
-
-```bash
-bash scripts/start_laptop.sh
-```
-
-Monitorear alertas:
-```bash
-docker exec mqtt-broker mosquitto_sub -t "edge/alerts" -v
-docker exec mqtt-broker mosquitto_sub -t "edge/monitor" -v
-```
-
-## Capacidades Implementadas
-
-| Capacidad | Descripción |
-| :--- | :--- |
-| **Detección de personas** | YOLOv8 en tiempo real via eKuiper Portable Plugin. |
-| **Análisis de EPP** | Modelo fine-tuned (casco) + fallback HSV (chaleco). |
-| **Ingesta directa de video** | eKuiper Video Source plugin (V4L2/ffmpeg). |
-| **Filtrado en el borde** | Reglas SQL: solo alertas critical/high llegan a MQTT. |
-| **Aceleración ARM** | Exportación a TFLite (eKuiper nativo) y NCNN (NEON SIMD). |
-| **Telemetría IoT** | Monitoreo de CPU, RAM, temperatura y throttling. |
-| **Despliegue containerizado** | Todos los servicios en Docker, incluyendo inferencia. |
+- **Sector Minero:** Monitoreo de vibraciones de maquinaria pesada, control de fatiga en conductores, detección perimetral en áreas sin cobertura 5G/LTE estable.
+- **Sector Bancario y Retail:** Procesamiento distribuido de eventos de flujo de clientes en sucursales, observabilidad de infraestructura local, y alertas de seguridad, evitando enviar cientos de streams RTSP hacia el datacenter central.
 
 ## Documentación Técnica
 
-| Documento | Contenido |
-| :--- | :--- |
-| [Arquitectura y Flujo de Datos](docs/architecture.md) | Pipeline eKuiper-nativo, MQTT topics, despliegue Docker. |
-| [Sistema de Detección](docs/detector.md) | Portable Plugin, modelos, evaluación EPP, health monitor. |
-| [Configuración y Despliegue](docs/deployment.md) | Despliegue automatizado/manual, conversión de modelos, troubleshooting. |
+La documentación ha sido estructurada exhaustivamente para cubrir el ciclo de vida completo de los datos. Recomendamos seguir este orden de lectura:
+
+| Tema | Descripción | Enlace |
+| :--- | :--- | :--- |
+| **1. Arquitectura** | Topología de red, componentes, responsabilidades y diseño. | [architecture.md](docs/architecture.md) |
+| **2. Procesamiento Edge** | El rol fundamental de **eKuiper**, el pipeline de IA y el filtrado local. | [edge-processing.md](docs/edge-processing.md) |
+| **3. Pipeline de Datos** | Tubería completa: Mosquitto → Telegraf → InfluxDB → Grafana. | [data-pipeline.md](docs/data-pipeline.md) |
+| **4. Despliegue** | Instrucciones parametrizables para Server y Dispositivos Edge. | [deployment.md](docs/deployment.md) |
+
+## Tecnologías Principales
+
+| Capa | Tecnología | Función Principal |
+| :--- | :--- | :--- |
+| **Streaming Edge** | [MediaMTX](https://github.com/bluenviron/mediamtx) | Adquisición y ruteo RTSP/WebRTC del flujo de cámara en el dispositivo. |
+| **Procesamiento Edge**| [LF Edge eKuiper](https://ekuiper.org/) | Motor de procesamiento de flujo de datos, ejecución de IA, evaluación de reglas SQL. |
+| **Modelos IA** | YOLOv8 (Ultralytics) | Detección de personas optimizada para dispositivos ARM (TFLite/NCNN). |
+| **Transporte** | [Eclipse Mosquitto](https://mosquitto.org/) | Broker MQTT que actúa como columna vertebral de comunicación asíncrona. |
+| **Almacenamiento** | [InfluxDB 2.x](https://www.influxdata.com/) | Base de datos de series temporales para almacenar eventos de IA y telemetría de hardware. |
+| **Visualización** | [Grafana](https://grafana.com/) | Dashboards de monitoreo analítico (Alertas PPE y Observabilidad Edge). |
+| **Orquestación** | Docker Compose | Contenerización y despliegue agnóstico al sistema operativo subyacente. |
