@@ -46,8 +46,8 @@ services:
       MQTT_USER_ACTION: "${MQTT_USER_ACTION:-action_service}"
       MQTT_PASS_ACTION: "${MQTT_PASS_ACTION:-SecureAction2026!}"
     volumes:
-      - ./infrastructure/mqtt/server-config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./infrastructure/mqtt/server-config/entrypoint.sh:/entrypoint.sh:ro
+      - ./config/mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./config/mqtt/entrypoint.sh:/entrypoint.sh:ro
       - mosquitto-data:/mosquitto/data
     entrypoint: /entrypoint.sh
     networks:
@@ -55,7 +55,7 @@ services:
 
   # Action Service
   action_service:
-    build: ./services/action_service
+    build: ../../services/action-service
     container_name: edge-actions
     restart: unless-stopped
     environment:
@@ -100,7 +100,7 @@ services:
       MQTT_USERNAME: "${MQTT_USER_EDGE:-edge_device}"
       MQTT_PASSWORD: "${MQTT_PASS_EDGE:-SecureEdge2026!}"
     volumes:
-      - ./infrastructure/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - ./config/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
     depends_on:
       - mqtt
       - influxdb
@@ -121,8 +121,8 @@ services:
       INFLUX_TOKEN: "${INFLUX_TOKEN:-edge-vision-token-2026}"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - influxdb
     networks:

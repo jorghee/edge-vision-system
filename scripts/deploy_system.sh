@@ -17,7 +17,7 @@ echo ""
 
 # Start the Central Server locally
 echo "[1/4] Starting Central Server (MQTT Broker + Action Service)..."
-docker compose -f "${PROJECT_ROOT}/docker-compose.server.yml" up --build -d
+docker compose -f "${PROJECT_ROOT}/infrastructure/central-server/docker-compose.server.yml" up --build -d
 
 # Determine Central Server IP
 echo ""

@@ -22,13 +22,13 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./infrastructure/mqtt/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./config/mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
       - mosquitto-data:/mosquitto/data
     networks:
       - edge-net
 
   ekuiper:
-    build: ./services/ekuiper
+    build: ../../services/ekuiper-engine
     container_name: ekuiper-engine
     restart: unless-stopped
     privileged: true
@@ -45,16 +45,16 @@ services:
     volumes:
       - ekuiper-data:/kuiper/data
       - ekuiper-log:/kuiper/log
-      - ./services/ekuiper/plugins/ppe_inference:/kuiper/plugins/portables/ppe_inference
-      - ./services/detector/models:/kuiper/models
-      - ./infrastructure/ekuiper/sources/video.yaml:/kuiper/etc/sources/video.yaml
+      - ../../services/ekuiper-engine/plugins/ppe_inference:/kuiper/plugins/portables/ppe_inference
+      - ../../services/ai-models/models:/kuiper/models
+      - ./config/ekuiper/video.yaml:/kuiper/etc/sources/video.yaml
     depends_on:
       - mqtt
     networks:
       - edge-net
 
   action_service:
-    build: ./services/action_service
+    build: ../../services/action-service
     container_name: edge-actions
     restart: unless-stopped
     environment:

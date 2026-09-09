@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DETECTOR_DIR="${PROJECT_ROOT}/services/detector"
+DETECTOR_DIR="${PROJECT_ROOT}/services/ai-models"
 MODELS_DIR="${DETECTOR_DIR}/models"
 SCRIPTS_DIR="${DETECTOR_DIR}/scripts"
 

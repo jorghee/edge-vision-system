@@ -4,7 +4,7 @@
 # and publishes detection results to the CENTRAL SERVER's MQTT broker.
 #
 # Usage:
-#   MQTT_SERVER_URL=tcp://192.168.1.100:1883 docker compose -f docker-compose.rpi.yml up -d
+#   MQTT_SERVER_URL=tcp://192.168.1.100:1883 docker compose -f docker-compose.device.yml up -d
 #
 # Environment variables:
 #   MQTT_SERVER_URL  - Central server MQTT broker (required, e.g. tcp://192.168.1.100:1883)
@@ -41,7 +41,7 @@ services:
       - edge-net
 
   ekuiper:
-    build: ./services/ekuiper
+    build: ../../services/ekuiper-engine
     container_name: ekuiper-engine
     restart: unless-stopped
     ports:
@@ -63,9 +63,9 @@ services:
     volumes:
       - ekuiper-data:/kuiper/data
       - ekuiper-log:/kuiper/log
-      - ./services/ekuiper/plugins/ppe_inference:/kuiper/plugins/portables/ppe_inference
-      - ./services/detector/models:/kuiper/models
-      - ./infrastructure/ekuiper/sources/cameraSource.yaml:/kuiper/etc/sources/cameraSource.yaml
+      - ../../services/ekuiper-engine/plugins/ppe_inference:/kuiper/plugins/portables/ppe_inference
+      - ../../services/ai-models/models:/kuiper/models
+      - ./config/ekuiper/cameraSource.yaml:/kuiper/etc/sources/cameraSource.yaml
     depends_on:
       - mediamtx
     networks:
@@ -73,7 +73,7 @@ services:
 
   # Node Agent: lightweight device metrics collector
   node_agent:
-    build: ./services/node_agent
+    build: ../../services/device-obs
     container_name: node-agent
     restart: unless-stopped
     environment:

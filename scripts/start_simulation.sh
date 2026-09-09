@@ -8,7 +8,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 echo "[1/3] Building and starting Docker services..."
-docker compose up --build -d
+docker compose -f infrastructure/local-simulation/docker-compose.simulation.yml up --build -d
 
 echo "[2/3] Waiting for eKuiper to be ready..."
 RETRIES=0
@@ -31,4 +31,4 @@ echo "System is running. Useful commands:"
 echo "  docker ps                                                    # check containers"
 echo "  docker exec mqtt-broker mosquitto_sub -t 'edge/alerts' -v    # alerts"
 echo "  docker exec mqtt-broker mosquitto_sub -t 'edge/monitor' -v   # all events"
-echo "  docker compose down                                          # stop all"
+echo "  docker compose -f infrastructure/local-simulation/docker-compose.simulation.yml down                                          # stop all"

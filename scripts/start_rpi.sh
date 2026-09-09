@@ -31,7 +31,7 @@ EOF
 echo "[INFO] Configuration saved to .env (MQTT target: ${MQTT_SERVER_URL})"
 
 echo "[1/3] Starting Edge containers (ARM64)..."
-docker compose -f docker-compose.rpi.yml up --build -d
+docker compose -f infrastructure/edge-device/docker-compose.device.yml up --build -d
 
 echo "[2/3] Waiting for eKuiper to be ready..."
 RETRIES=0
@@ -53,7 +53,7 @@ echo ""
 echo "Edge System is running and connected to: ${MQTT_SERVER_URL}"
 echo "Useful commands:"
 echo "  docker ps                                                    # check containers"
-echo "  docker compose -f docker-compose.rpi.yml logs -f             # view logs"
-echo "  docker compose -f docker-compose.rpi.yml down                # stop all"
+echo "  docker compose -f infrastructure/edge-device/docker-compose.device.yml logs -f             # view logs"
+echo "  docker compose -f infrastructure/edge-device/docker-compose.device.yml down                # stop all"
 echo ""
 echo "Verify alerts on the CENTRAL SERVER by subscribing to MQTT topics 'edge/alerts' and 'edge/monitor'."

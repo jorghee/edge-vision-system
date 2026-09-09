@@ -109,8 +109,8 @@ ssh "${RPI_USER}@${RPI_IP}" "
 "
 
 # Transfer pre-exported models (not in git due to .gitignore)
-MODELS_DIR="${PROJECT_ROOT}/services/detector/models"
-RPI_MODELS_DIR="${RPI_PROJECT_DIR}/services/detector/models"
+MODELS_DIR="${PROJECT_ROOT}/services/ai-models/models"
+RPI_MODELS_DIR="${RPI_PROJECT_DIR}/services/ai-models/models"
 
 ssh "${RPI_USER}@${RPI_IP}" "mkdir -p '${RPI_MODELS_DIR}'"
 echo "  Transferring models (TFLite + NCNN)..."
