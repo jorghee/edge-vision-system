@@ -29,6 +29,9 @@ services:
     container_name: mediamtx
     restart: unless-stopped
     privileged: true
+    ports:
+      - "8889:8889"
+      - "8888:8888"
     tmpfs:
       - /dev/shm:exec
     volumes:
