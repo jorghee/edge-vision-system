@@ -25,18 +25,17 @@ if [ ! -d "${VENV_DIR}" ]; then
     python3 -m venv "${VENV_DIR}"
 fi
 
-echo "[INFO] Activating virtual environment and installing dependencies..."
-source "${VENV_DIR}/bin/activate"
-pip install -r "${DETECTOR_DIR}/requirements.txt" --quiet
+echo "[INFO] Using virtual environment and installing dependencies..."
+"${VENV_DIR}/bin/python3" -m pip install -r "${DETECTOR_DIR}/requirements.txt" --quiet
 
-if ! python3 -c "import ultralytics" >/dev/null 2>&1; then
+if ! "${VENV_DIR}/bin/python3" -c "import ultralytics" >/dev/null 2>&1; then
     echo "[ERROR] Failed to install required packages (e.g., ultralytics)."
     exit 1
 fi
 
 echo "[2/5] Downloading models..."
 export MODELS_DIR
-python3 "${SCRIPTS_DIR}/download_model.py"
+"${VENV_DIR}/bin/python3" "${SCRIPTS_DIR}/download_model.py"
 
 BASE_MODEL="${MODELS_DIR}/yolov8n.pt"
 PPE_MODEL="${MODELS_DIR}/ppe_detector.pt"
@@ -63,7 +62,7 @@ if [ "${NEEDS_TFLITE}" = true ]; then
     if [ -f "${PPE_MODEL}" ]; then
         export_args="${export_args} --ppe \"${PPE_MODEL}\""
     fi
-    eval "python3 \"${SCRIPTS_DIR}/export_model.py\" ${export_args}"
+    eval "\"${VENV_DIR}/bin/python3\" \"${SCRIPTS_DIR}/export_model.py\" ${export_args}"
 else
     echo "[INFO] TFLite models already exist, skipping export."
 fi
@@ -85,7 +84,7 @@ if [ "${NEEDS_NCNN}" = true ]; then
     if [ -f "${PPE_MODEL}" ]; then
         export_args="${export_args} --ppe \"${PPE_MODEL}\""
     fi
-    eval "python3 \"${SCRIPTS_DIR}/export_model.py\" ${export_args}"
+    eval "\"${VENV_DIR}/bin/python3\" \"${SCRIPTS_DIR}/export_model.py\" ${export_args}"
 else
     echo "[INFO] NCNN models already exist, skipping export."
 fi
