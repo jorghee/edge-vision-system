@@ -283,6 +283,13 @@
               { "id": "displayName", "value": "Sin Casco" },
               { "id": "color", "value": { "fixedColor": "#FADE2A", "mode": "fixed" } }
             ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "indeterminate" },
+            "properties": [
+              { "id": "displayName", "value": "Indeterminado" },
+              { "id": "color", "value": { "fixedColor": "#8E8E93", "mode": "fixed" } }
+            ]
           }
         ]
       },
@@ -337,7 +344,8 @@
               },
               { "id": "mappings", "value": [
                 { "type": "value", "options": { "critical": { "text": "CRÍTICA", "color": "#F2495C" } } },
-                { "type": "value", "options": { "high": { "text": "ALTA", "color": "#FF9830" } } }
+                { "type": "value", "options": { "high": { "text": "ALTA", "color": "#FF9830" } } },
+                { "type": "value", "options": { "indeterminate": { "text": "DUDOSO", "color": "#8E8E93" } } }
               ]}
             ]
           },
@@ -349,7 +357,8 @@
               { "id": "mappings", "value": [
                 { "type": "value", "options": { "no_vest": { "text": "Sin Chaleco" } } },
                 { "type": "value", "options": { "no_helmet": { "text": "Sin Casco" } } },
-                { "type": "value", "options": { "no_helmet_no_vest": { "text": "Sin Casco + Chaleco" } } }
+                { "type": "value", "options": { "no_helmet_no_vest": { "text": "Sin Casco + Chaleco" } } },
+                { "type": "value", "options": { "indeterminate": { "text": "Indeterminado" } } }
               ]}
             ]
           },

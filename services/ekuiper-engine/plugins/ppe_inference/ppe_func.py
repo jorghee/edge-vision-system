@@ -221,7 +221,10 @@ def _check_helmet_model(crop, models):
                 head_detected = True
 
     if not head_detected and not helmet_detected:
-        return True, 0.5
+        # Cannot assess helmet status: head region not visible or not
+        # classifiable. Return None to signal an indeterminate result
+        # instead of fabricating a confidence value.
+        return None, 0.0
 
     return helmet_detected, round(helmet_conf, 2)
 
@@ -280,7 +283,15 @@ def _check_vest(crop):
 
 
 def _classify_severity(helmet_ok, vest_ok):
-    """Determine event type and severity from PPE status."""
+    """Determine event type and severity from PPE status.
+
+    Uses a three-valued logic: True (detected), False (not detected),
+    and None (indeterminate -- the model could not assess the item).
+    When any assessment is indeterminate, the entire event is classified
+    as indeterminate to avoid false positives from fabricated values.
+    """
+    if helmet_ok is None:
+        return "indeterminate", "indeterminate"
     if not helmet_ok and not vest_ok:
         return "no_helmet_no_vest", "critical"
     elif not helmet_ok:
@@ -338,7 +349,7 @@ def process_frame(frame_bytes):
             "severity": severity,
             "confidence": avg_conf,
             "person_id": person_id,
-            "helmet_detected": helmet_ok,
+            "helmet_detected": bool(helmet_ok) if helmet_ok is not None else False,
             "helmet_confidence": round(helmet_conf, 2),
             "vest_detected": vest_ok,
             "vest_confidence": round(vest_conf, 2),
@@ -355,9 +366,9 @@ def process_frame(frame_bytes):
             "persons_detected": len(persons),
         }
 
-    # Sort by severity: critical > high > none
-    severity_rank = {"critical": 0, "high": 1, "none": 2}
-    detections.sort(key=lambda d: severity_rank.get(d["severity"], 3))
+    # Sort by severity: critical > high > indeterminate > none
+    severity_rank = {"critical": 0, "high": 1, "indeterminate": 2, "none": 3}
+    detections.sort(key=lambda d: severity_rank.get(d["severity"], 4))
 
     result = detections[0]
 
