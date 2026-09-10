@@ -1,83 +1,223 @@
-# Despliegue y Configuración
+# Deployment
 
-El despliegue de este sistema debe abordarse en dos fases físicas diferenciadas: primero se debe aprovisionar el **Servidor Central** (para que exista un destino hacia donde enviar la información), y posteriormente se despliegan los **Dispositivos Edge**.
+This document provides step-by-step instructions for deploying the Edge Vision System. The system consists of two independently deployed components: the **Central Server** and one or more **Edge Devices**.
 
-Todas las dependencias están empaquetadas en contenedores Docker, garantizando un despliegue predecible independientemente del sistema operativo base.
-
-## 1. Servidor Central
-
-El Servidor Central puede ser una máquina local, un servidor on-premise, o una instancia en la nube (AWS EC2, Google Cloud Compute Engine). Solo requiere Linux y Docker.
-
-### Componentes que levanta:
-- Broker MQTT (Mosquitto)
-- Base de datos (InfluxDB)
-- Colector (Telegraf)
-- Dashboards (Grafana)
-
-### Pasos de Despliegue:
-
-1. Ingresar al directorio del servidor central:
-   ```bash
-   cd infrastructure/central-server
-   ```
-2. (Opcional) Ajustar el archivo `.env` si se requiere modificar los puertos por defecto, el token de InfluxDB, o las credenciales de Grafana.
-3. Levantar la infraestructura en segundo plano:
-   ```bash
-   docker compose -f docker-compose.server.yml up -d
-   ```
-4. Verificar que todos los servicios estén operacionales:
-   ```bash
-   docker ps
-   ```
-
-A partir de este momento, Grafana está disponible en `http://<IP_DEL_SERVIDOR>:3000` (usuario `admin`, clave `admin` por defecto) y el Broker MQTT está esperando conexiones en el puerto `1883`.
+For architectural context, see [architecture.md](architecture.md). For details on eKuiper provisioning, see [edge-processing.md](edge-processing.md).
 
 ---
 
-## 2. Dispositivo Edge (Ej. Raspberry Pi)
+## Prerequisites
 
-El dispositivo en el borde requiere tener conectada físicamente una cámara (ya sea por USB o módulo CSI compatible con V4L2) y acceso a red para alcanzar al Servidor Central.
+| Requirement | Central Server | Edge Device (RPi) |
+|:---|:---|:---|
+| Docker + Docker Compose | Required | Required |
+| Git | Required | Required |
+| Python 3.11+ | Not needed | Not needed (runs in Docker) |
+| Camera | Not needed | USB or CSI camera at `/dev/video0` |
+| Network | Accessible IP on the LAN | Can reach central server on port 1883 |
 
 > [!IMPORTANT]
-> Antes de desplegar el Edge Device, asegúrese de tener la dirección IP o dominio del Servidor Central.
-
-### Componentes que levanta:
-- Servidor RTSP Local (MediaMTX)
-- Motor de Procesamiento y Reglas (eKuiper)
-- Script de Telemetría (Node Agent)
-
-### Pasos de Despliegue (Automatizado mediante Script):
-
-El proyecto incluye un script robusto que automatiza la instalación completa. Copie el repositorio a la Raspberry Pi y ejecute:
-
-1. Ejecutar el script principal indicando la URL MQTT del servidor central:
-   ```bash
-   bash scripts/deploy_edge.sh "tcp://<IP_DEL_SERVIDOR_CENTRAL>:1883"
-   ```
-
-### ¿Qué hace el script `deploy_edge.sh` por debajo?
-
-Si desea desplegar manualmente o requiere auditar el script, estos son los pasos internos que ejecuta:
-
-1. **Gestión de variables:** Inserta la IP del Servidor Central en el archivo `infrastructure/edge-device/.env` bajo la variable `MQTT_SERVER_URL`.
-2. **Levantamiento Docker:** Ejecuta `docker compose -f infrastructure/edge-device/docker-compose.device.yml up -d` para iniciar MediaMTX, eKuiper y el Node Agent.
-3. **Conversión de Modelos:** Si eKuiper arranca correctamente, ejecuta `scripts/prepare_models.sh` para asegurar que el modelo YOLOv8 crudo (.pt) se convierta y esté disponible en formato TFLite o NCNN (requeridos para eKuiper).
-4. **Aprovisionamiento de eKuiper:** Ejecuta `scripts/setup_ekuiper.sh`, el cual interactúa con la API REST de eKuiper para inyectar, en este orden:
-   - El plugin portable en Python (`ppe_inference`).
-   - El stream origen conectado a MediaMTX (`camera_frames`).
-   - Las reglas SQL que vinculan el stream con el plugin y configuran las salidas hacia MQTT.
-
-> [!WARNING]
-> La cámara física debe estar disponible en la ruta `/dev/video0`. Si su cámara se monta en un path distinto (ej. `/dev/video2`), modifique el valor `CAM_DEVICE` en el archivo `infrastructure/edge-device/.env` antes de ejecutar el script.
+> The central server must be deployed and running before any edge device can connect. Edge devices publish to the central server's MQTT broker, so it must be reachable at the time of deployment.
 
 ---
 
-## 3. Simulación Local (Modo Desarrollo)
+## Central Server Deployment
 
-Si usted no posee una Raspberry Pi y desea **simular el sistema completo** directamente en su Laptop (x86_64) para motivos de desarrollo o depuración, puede desplegar ambos lados simultáneamente.
+The central server hosts the MQTT broker, data ingestion pipeline (Telegraf + InfluxDB), Grafana dashboards, and the Action Service. All components run as Docker containers.
 
-1. Ejecute el script de simulación:
-   ```bash
-   bash scripts/start_simulation.sh
-   ```
-Este script levantará una arquitectura combinada (`infrastructure/local-simulation`) que fusiona los componentes centrales y los del borde en una única red de Docker local, utilizando la webcam conectada a su computadora como origen de datos.
+### Configuration
+
+The deployment uses environment variables with sensible defaults. These can be overridden by creating or editing an `.env` file in the `infrastructure/central-server/` directory, or by exporting them before running Docker Compose.
+
+| Variable | Default | Purpose |
+|:---|:---|:---|
+| `MQTT_USER_EDGE` | `edge_device` | MQTT username for edge device connections |
+| `MQTT_PASS_EDGE` | `SecureEdge2026!` | MQTT password for edge devices |
+| `MQTT_USER_ACTION` | `action_service` | MQTT username for the action service |
+| `MQTT_PASS_ACTION` | `SecureAction2026!` | MQTT password for the action service |
+| `INFLUX_TOKEN` | `edge-vision-token-2026` | InfluxDB admin API token |
+| `GF_SECURITY_ADMIN_PASSWORD` | `admin` | Grafana admin password |
+
+### Steps
+
+```bash
+# Navigate to the central server directory
+cd infrastructure/central-server
+
+# Start all services
+docker compose -f docker-compose.server.yml up --build -d
+
+# Verify all containers are running
+docker ps
+```
+
+Expected containers: `mqtt-broker`, `edge-actions`, `influxdb`, `telegraf`, `grafana`.
+
+### Verification
+
+| Check | Command |
+|:---|:---|
+| Grafana UI | Open `http://<SERVER_IP>:3000` in a browser |
+| MQTT broker | `docker logs mqtt-broker --tail 10` |
+| InfluxDB | `curl -s http://localhost:8086/health` |
+| Subscribe to events | `docker exec mqtt-broker mosquitto_sub -t "edge/#" -v -u edge_device -P 'SecureEdge2026!'` |
+
+### Stopping
+
+```bash
+cd infrastructure/central-server
+docker compose -f docker-compose.server.yml down
+```
+
+Add `-v` to also remove persistent volumes (InfluxDB data, Grafana settings, Mosquitto data):
+
+```bash
+docker compose -f docker-compose.server.yml down -v
+```
+
+> [!WARNING]
+> Using `down -v` permanently deletes all stored data, including InfluxDB time-series history and Grafana customizations.
+
+---
+
+## Edge Device Deployment
+
+Each edge device runs MediaMTX (camera server), eKuiper (stream processor with AI inference), and the Node Agent (telemetry). All components run as Docker containers on the Raspberry Pi.
+
+### Automated Deployment (from a laptop)
+
+The `deploy_edge.sh` script handles the full deployment lifecycle remotely via SSH:
+
+```bash
+bash scripts/deploy_edge.sh "tcp://<SERVER_IP>:1883"
+```
+
+The script performs the following steps:
+
+| Step | Action | Where |
+|:---|:---|:---|
+| 1 | Prepare AI models (download + export to TFLite/NCNN) | Laptop |
+| 2 | Push local commits to the remote Git repository | Laptop |
+| 3 | Prompt for RPi SSH credentials and verify connectivity | Laptop |
+| 4 | Install Git and Docker on the RPi (if not present) | RPi (via SSH) |
+| 5 | Clone or pull the repository on the RPi | RPi (via SSH) |
+| 6 | Transfer model files via SCP | Laptop to RPi |
+| 7 | Start containers and provision eKuiper rules | RPi (via SSH) |
+
+### Full System Deployment
+
+To deploy both the central server and an edge device in a single command:
+
+```bash
+bash scripts/deploy_system.sh
+```
+
+This script starts the central server locally, detects the machine's IP address, and then calls `deploy_edge.sh` with the detected MQTT URL.
+
+### Manual Deployment (on the RPi)
+
+If the code and models are already on the Raspberry Pi:
+
+```bash
+MQTT_SERVER_URL="tcp://<SERVER_IP>:1883" bash scripts/start_rpi.sh
+```
+
+This script:
+1. Writes the MQTT configuration to `.env` for persistence.
+2. Starts the Docker containers via `docker compose -f infrastructure/edge-device/docker-compose.device.yml up --build -d`.
+3. Waits for eKuiper's REST API to become available.
+4. Runs `scripts/setup_ekuiper.sh` to register the portable plugin, create the camera stream, and provision the SQL rules.
+
+### Configuration
+
+Edge device configuration is managed through environment variables, typically set in the `.env` file at the project root (auto-generated by `start_rpi.sh`):
+
+| Variable | Default | Purpose |
+|:---|:---|:---|
+| `MQTT_SERVER_URL` | *(required)* | Central server MQTT broker URL (e.g., `tcp://192.168.1.100:1883`) |
+| `MQTT_USERNAME` | `edge_device` | MQTT authentication username |
+| `MQTT_PASSWORD` | `SecureEdge2026!` | MQTT authentication password |
+| `CAMERA_ID` | `cam-rpi-01` | Unique identifier for this device (used in MQTT topics and Grafana filters) |
+
+Additional configuration in `docker-compose.device.yml`:
+
+| Variable | Default | Purpose |
+|:---|:---|:---|
+| `CONFIDENCE_THR` | `0.45` | Minimum YOLOv8 confidence threshold |
+| `RTSP_URL` | `rtsp://mediamtx:8554/cam` | Internal RTSP stream URL (usually does not need changing) |
+| `COLLECT_INTERVAL` | `30` | Node Agent telemetry interval in seconds |
+
+### Verification
+
+```bash
+# Check running containers
+docker ps
+# Expected: mediamtx, ekuiper-engine, node-agent
+
+# Check eKuiper rules
+curl -s http://localhost:9081/rules | python3 -m json.tool
+
+# Check a specific rule's status
+curl -s http://localhost:9081/rules/ppe_monitor/status | python3 -m json.tool
+
+# View eKuiper logs
+docker logs ekuiper-engine --tail 50
+
+# View Node Agent logs
+docker logs node-agent --tail 20
+```
+
+### Stopping
+
+```bash
+docker compose -f infrastructure/edge-device/docker-compose.device.yml down
+```
+
+---
+
+## Model Preparation
+
+AI models are not included in the Git repository. They are downloaded and exported by `scripts/prepare_models.sh`:
+
+```bash
+bash scripts/prepare_models.sh
+```
+
+This script:
+1. Creates a Python virtual environment in `services/ai-models/venv/`.
+2. Installs Ultralytics and dependencies.
+3. Downloads YOLOv8n base weights (`yolov8n.pt`).
+4. Exports to TFLite format (primary, for eKuiper compatibility).
+5. Exports to NCNN format (secondary, optimized for ARM NEON SIMD).
+
+The exported models are stored in `services/ai-models/models/` and are transferred to the Raspberry Pi during deployment via SCP.
+
+> [!NOTE]
+> The script is idempotent. If models already exist in the expected formats, export steps are skipped.
+
+---
+
+## Simulation (Development Only)
+
+> [!NOTE]
+> Simulation mode is intended for local development and testing when a Raspberry Pi is not available. It does not include the full central server monitoring stack (no Telegraf, InfluxDB, or Grafana). It runs a combined edge + MQTT setup using the laptop's webcam.
+
+```bash
+bash scripts/start_simulation.sh
+```
+
+This starts the containers defined in `infrastructure/local-simulation/docker-compose.simulation.yml`, which maps the laptop's webcam (default: `/dev/video2`) directly to eKuiper. The local Mosquitto broker runs without authentication.
+
+---
+
+## Troubleshooting
+
+| Problem | Likely Cause | Resolution |
+|:---|:---|:---|
+| eKuiper rule creation fails after multiple retries | Portable plugin still loading (common on ARM64) | Wait for plugin initialization; the script retries up to 6 times with exponential backoff |
+| `No base YOLO model found` | Models not transferred to RPi | Run `deploy_edge.sh` or manually SCP models to `services/ai-models/models/` |
+| MediaMTX container restarts | Camera not detected at `/dev/video0` | Verify camera connection; check `docker logs mediamtx` |
+| No data in Grafana | Telegraf not receiving MQTT messages | Verify MQTT credentials match between edge `.env` and server `docker-compose.server.yml` |
+| `docker: permission denied` | User not in the `docker` group | Run `sudo usermod -aG docker $USER` and re-login |
+| High CPU with low FPS | Model too large for the device | Use TFLite or NCNN format instead of PyTorch; reduce `CAMERA_FPS` |
+| Temperature warnings in Device Health | Sustained AI inference causing thermal throttling | Add heatsink/fan to RPi; reduce FPS; check for adequate ventilation |
