@@ -38,8 +38,9 @@ services:
       MQTT_SOURCE__DEFAULT__SERVER: "tcp://mqtt:1883"
       KUIPER__PORTABLE__PYTHON_BIN: "python3"
       MODELS_DIR: "/kuiper/models"
-      CAMERA_ID: "cam-01"
-      CONFIDENCE_THR: "0.45"
+      CAMERA_ID: "${CAMERA_ID:-cam-01}"
+      CONFIDENCE_THR: "${CONFIDENCE_THR:-0.45}"
+      CAMERA_FPS: "${CAMERA_FPS:-2}"
     devices:
       - "/dev/video2:/dev/video2"
     volumes:

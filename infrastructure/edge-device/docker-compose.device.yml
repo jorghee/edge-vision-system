@@ -61,7 +61,8 @@ services:
       # AI inference
       MODELS_DIR: "/kuiper/models"
       CAMERA_ID: "${CAMERA_ID:-cam-rpi-01}"
-      CONFIDENCE_THR: "0.45"
+      CONFIDENCE_THR: "${CONFIDENCE_THR:-0.45}"
+      CAMERA_FPS: "${CAMERA_FPS:-2}"
       RTSP_URL: "rtsp://mediamtx:8554/cam"
     volumes:
       - ekuiper-data:/kuiper/data
@@ -84,7 +85,7 @@ services:
       MQTT_USERNAME: "${MQTT_USERNAME:-edge_device}"
       MQTT_PASSWORD: "${MQTT_PASSWORD:-SecureEdge2026!}"
       CAMERA_ID: "${CAMERA_ID:-cam-rpi-01}"
-      COLLECT_INTERVAL: "30"
+      COLLECT_INTERVAL: "${COLLECT_INTERVAL:-30}"
       EKUIPER_API: "http://ekuiper-engine:9081"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
