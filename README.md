@@ -1,119 +1,194 @@
 # Edge Vision System
 
-Sistema de visión artificial para Edge Computing que procesa video localmente en dispositivos IoT (Raspberry Pi 4) mediante YOLOv8 para detectar personas y verificar el uso de Equipos de Protección Personal (EPP: casco y chaleco).
+An **Edge/IoT data engineering platform** that captures, processes, and filters sensor data locally on resource-constrained devices before transmitting only meaningful events to a central server for storage and analysis.
 
-## Objetivo
+The current deployment uses **PPE (Personal Protective Equipment) detection** as a demonstration use case: a Raspberry Pi captures video, runs YOLOv8 inference, evaluates helmet and vest compliance, and publishes structured alerts - all without sending a single video frame over the network.
 
-Eliminar la transmisión constante de video hacia la nube. El sistema filtra inteligentemente en el borde y transmite únicamente alertas estructuradas en JSON ante eventos críticos, minimizando el consumo de ancho de banda.
+## The Problem
 
-## Arquitectura
+Industrial IoT deployments generate enormous volumes of raw data. A single camera produces roughly 5 Mbps of continuous video. Transmitting this to a centralized server is impractical in environments with limited or unreliable bandwidth (mining sites, factory floors, remote facilities).
 
-El sistema implementa una arquitectura **eKuiper-nativa** donde el motor de reglas es el actor principal del pipeline:
+This project implements an **edge-first** approach where heavy processing happens at the source. The raw data never leaves the device. Only lightweight, structured JSON events are transmitted, reducing bandwidth consumption by orders of magnitude.
+
+## Architecture Overview
+
+The system is split into two physically separate components connected over a standard network via MQTT.
 
 ```mermaid
 graph TD
-    CAM["/dev/video0"] -->|V4L2| EK_VS["eKuiper Video Source"]
-    EK_VS -->|frames| EK_PP["Portable Plugin<br/>(YOLOv8 + PPE)"]
-    EK_PP -->|detections| EK_SQL["SQL Rules"]
-    EK_SQL -->|"edge/alerts"| MQTT["Mosquitto"]
-    MQTT --> ACT["Action Service"]
-    HM["Health Monitor"] -->|"edge/health"| MQTT
+    subgraph "Edge Device - Raspberry Pi"
+        CAM["/dev/video0\n(Camera)"]
+        MTX["MediaMTX\n(RTSP Server)"]
+        EK["eKuiper\n(Stream Processor)"]
+        NA["Node Agent\n(Device Telemetry)"]
+
+        CAM --> MTX
+        MTX -->|RTSP| EK
+    end
+
+    subgraph "Central Server"
+        MQTT["Mosquitto\n(MQTT Broker)"]
+        ACT["Action Service\n(Alert Handler)"]
+        TLG["Telegraf\n(Data Collector)"]
+        IDB[("InfluxDB\n(Time-Series DB)")]
+        GF["Grafana\n(Dashboards)"]
+
+        MQTT --> ACT
+        MQTT --> TLG
+        TLG --> IDB
+        IDB --> GF
+    end
+
+    EK -->|"edge/alerts\nedge/monitor"| MQTT
+    NA -->|"edge/metrics/{id}"| MQTT
 ```
 
-| Componente | Función | Tecnología |
-| :--- | :--- | :--- |
-| **eKuiper** | Captura de video, inferencia IA, filtrado SQL, publicación de alertas | Go + Portable Python Plugin |
-| **Portable Plugin** | Detección de personas (YOLOv8), análisis de EPP (modelo + HSV) | Python, Ultralytics, OpenCV |
-| **Broker MQTT** | Sink para alertas filtradas, bus entre servicios | Eclipse Mosquitto |
-| **Action Service** | Respuesta reactiva ante alertas | Python, Paho MQTT |
-| **Health Monitor** | Telemetría del dispositivo (CPU, RAM, temperatura, throttling) | Python |
+**Edge Device** captures video through MediaMTX, processes it with eKuiper (which runs YOLOv8 inference via a portable Python plugin and applies SQL-based filtering rules), and publishes only relevant detection events. A lightweight Node Agent independently collects hardware telemetry.
+
+**Central Server** receives MQTT messages through Mosquitto, ingests them via Telegraf into InfluxDB, and exposes two Grafana dashboards for analysis and device monitoring.
+
+## Data Flow
+
+The following diagram traces how a single camera frame is transformed into an actionable alert stored in InfluxDB:
+
+```mermaid
+sequenceDiagram
+    participant C as Camera
+    participant M as MediaMTX
+    participant E as eKuiper
+    participant P as PPE Plugin
+    participant MQ as Mosquitto
+    participant T as Telegraf
+    participant I as InfluxDB
+    participant G as Grafana
+
+    C->>M: Raw video stream
+    M->>E: RTSP frames (2 FPS)
+    E->>P: Base64-encoded frame
+    P->>P: YOLOv8 person detection
+    P->>P: Helmet check (model or HSV)
+    P->>P: Vest check (HSV analysis)
+    P->>E: JSON detection result
+    E->>E: SQL filter (severity check)
+
+    alt severity = critical or high
+        E->>MQ: Publish to edge/alerts
+        MQ->>T: Forward message
+        T->>I: Write to ppe_events
+        I->>G: Query and display
+    else severity = none (compliant)
+        E--xE: Discard locally
+    end
+```
+
+A 5 MB video frame becomes a 2 KB JSON event. When no violations are detected, zero bytes are transmitted. This is the core value of edge processing.
+
+## Components
+
+| Component | Location | Runs On | Responsibility |
+|:---|:---|:---|:---|
+| **MediaMTX** | Edge Device | RPi | Captures camera via libcamera/V4L2 and serves RTSP locally |
+| **eKuiper** | Edge Device | RPi | Stream processing engine: frame capture, AI inference, SQL filtering |
+| **PPE Plugin** | Edge Device | RPi | YOLOv8 person detection + helmet/vest analysis (portable Python plugin) |
+| **Node Agent** | Edge Device | RPi | Collects CPU, RAM, temperature, disk, network, and eKuiper metrics |
+| **Mosquitto** | Central Server | Server | MQTT broker with authentication; receives events from all edge devices |
+| **Action Service** | Central Server | Server | Subscribes to `edge/alerts`, logs events, publishes response recommendations |
+| **Telegraf** | Central Server | Server | MQTT-to-InfluxDB bridge; parses JSON into tags and fields |
+| **InfluxDB** | Central Server | Server | Time-series database storing `ppe_events` and `device_metrics` |
+| **Grafana** | Central Server | Server | Dashboards for PPE alert analysis and device health monitoring |
+
+## MQTT Topics
+
+All communication between edge devices and the central server flows through MQTT:
+
+| Topic | Publisher | Content | QoS |
+|:---|:---|:---|:---|
+| `edge/alerts` | eKuiper | Critical/high severity PPE violations with snapshot | 1 |
+| `edge/monitor` | eKuiper | All non-compliant events (including lower severity) | 0 |
+| `edge/metrics/{camera_id}` | Node Agent | Device hardware telemetry and eKuiper processing stats | 0 |
+| `edge/actions` | Action Service | Response recommendations for received alerts | 1 |
+
+## Grafana Dashboards
+
+Two pre-provisioned dashboards are automatically loaded when Grafana starts:
+
+- **PPE Detection**: Alert counts by severity, timeline analysis, violation type distribution (pie chart), and a detailed events table with rendered snapshot images.
+- **Device Health**: Real-time connectivity status, CPU/RAM/temperature gauges, historical resource usage, network traffic (TX/RX), inference latency trends, frame processing rate, and error tracking.
+
+## Quick Start
+
+### Prerequisites
+
+- Docker and Docker Compose installed on both the central server and the Raspberry Pi.
+- A USB or CSI camera connected to the Raspberry Pi (accessible at `/dev/video0`).
+- Both machines connected to the same network.
+- SSH access from the deployment machine to the Raspberry Pi.
+
+> [!IMPORTANT]
+> The AI models (YOLOv8 weights) are not included in the repository. The deployment scripts download and export them automatically, which requires Python 3.11+ and an internet connection on the machine running the deployment.
+
+### Step 1: Deploy the Central Server
+
+On the machine designated as the central server:
+
+```bash
+cd infrastructure/central-server
+docker compose -f docker-compose.server.yml up --build -d
+```
+
+Verify all services are running:
+
+```bash
+docker ps
+# Expected: mqtt-broker, edge-actions, influxdb, telegraf, grafana
+```
+
+Grafana is available at `http://<SERVER_IP>:3000` (default credentials: `admin` / `admin`).
+
+### Step 2: Deploy the Edge Device
+
+From a machine with SSH access to the Raspberry Pi:
+
+```bash
+bash scripts/deploy_edge.sh "tcp://<SERVER_IP>:1883"
+```
+
+This script handles everything: model preparation, code synchronization to the RPi via Git, model transfer via SCP, container startup, and eKuiper rule provisioning. It will prompt for the RPi's SSH credentials.
+
+Alternatively, if the code and models are already on the Raspberry Pi:
+
+```bash
+MQTT_SERVER_URL="tcp://<SERVER_IP>:1883" bash scripts/start_rpi.sh
+```
+
+### Step 3: Verify
+
+On the central server, subscribe to MQTT to confirm events are arriving:
+
+```bash
+docker exec mqtt-broker mosquitto_sub -t "edge/#" -v -u edge_device -P 'SecureEdge2026!'
+```
+
+Open Grafana at `http://<SERVER_IP>:3000` and navigate to the **PPE Detection** or **Device Health** dashboards to see live data.
 
 > [!NOTE]
-> La arquitectura completa y el flujo de datos están documentados en [docs/architecture.md](docs/architecture.md).
+> For local development without a Raspberry Pi, a simulation mode is available that runs the entire stack on a single laptop using a USB webcam: `bash scripts/start_simulation.sh`. This is intended for development only and does not include the full central server monitoring stack.
 
-## Estructura del Proyecto
+## Applicability
 
-```
-edge-vision-system/
-├── services/
-│   ├── ekuiper/
-│   │   └── plugins/
-│   │       └── ppe_inference/        # Portable Plugin (inferencia IA)
-│   │           ├── ppe_func.py       # YOLOv8 + PPE analysis
-│   │           ├── ppe_inference.json # Plugin metadata
-│   │           └── requirements.txt
-│   ├── action_service/               # Servicio de respuesta a alertas
-│   │   ├── src/action_service.py
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   └── detector/                     # Legacy (models + export scripts)
-│       ├── models/                   # YOLOv8 models (TFLite/NCNN/PT)
-│       ├── scripts/                  # download_model.py, export_model.py
-│       └── src/                      # Archived: detector.py, camera.py
-├── infrastructure/
-│   ├── mqtt/config/                  # mosquitto.conf
-│   └── ekuiper/sources/             # video.yaml (Video Source config)
-├── scripts/                          # Deployment automation
-│   ├── deploy.sh                     # Full laptop → RPi deployment
-│   ├── prepare_models.sh             # Download + TFLite/NCNN export
-│   ├── setup_ekuiper.sh              # Video stream + SQL rules
-│   ├── start_laptop.sh               # Local execution
-│   └── start_rpi.sh                  # RPi execution
-├── docs/                             # Technical documentation
-├── docker-compose.yml                # x86_64 orchestration
-└── docker-compose.rpi.yml            # ARM64 orchestration (RPi)
-```
+While the current implementation demonstrates PPE detection, the underlying architecture (local stream processing, SQL-based filtering, MQTT transport, time-series storage, dashboard analytics) is applicable to other data-intensive scenarios:
 
-## Despliegue en Raspberry Pi 4
+- **Mining**: Equipment vibration monitoring, fatigue detection, perimeter security across remote sites with limited connectivity.
+- **Manufacturing**: Quality control on production lines, anomaly detection in machinery sensor streams.
+- **Banking and Retail**: Branch traffic flow analysis, distributed infrastructure monitoring, security event filtering before centralized processing.
 
-Todos los servicios corren en Docker. eKuiper captura video directamente del dispositivo V4L2 y ejecuta la inferencia internamente.
+These represent potential extensions. Only PPE detection is currently implemented.
 
-### Despliegue automatizado (desde la laptop)
+## Documentation
 
-```bash
-bash scripts/deploy.sh
-```
-
-| Paso | Acción | Equipo |
-| :--- | :--- | :--- |
-| 1 | Descarga modelos YOLOv8, exporta a TFLite y NCNN | Laptop |
-| 2 | Push de commits al remoto | Laptop |
-| 3 | Instalación de Git y Docker | RPi (SSH) |
-| 4 | Clone/pull del repositorio | RPi (SSH) |
-| 5 | Transferencia de modelos | Laptop → RPi |
-| 6 | Levantamiento del sistema | RPi (SSH) |
-
-> [!TIP]
-> Para despliegue manual y troubleshooting, consultar [docs/deployment.md](docs/deployment.md).
-
-## Entorno de Desarrollo (x86_64)
-
-```bash
-bash scripts/start_laptop.sh
-```
-
-Monitorear alertas:
-```bash
-docker exec mqtt-broker mosquitto_sub -t "edge/alerts" -v
-docker exec mqtt-broker mosquitto_sub -t "edge/monitor" -v
-```
-
-## Capacidades Implementadas
-
-| Capacidad | Descripción |
-| :--- | :--- |
-| **Detección de personas** | YOLOv8 en tiempo real via eKuiper Portable Plugin. |
-| **Análisis de EPP** | Modelo fine-tuned (casco) + fallback HSV (chaleco). |
-| **Ingesta directa de video** | eKuiper Video Source plugin (V4L2/ffmpeg). |
-| **Filtrado en el borde** | Reglas SQL: solo alertas critical/high llegan a MQTT. |
-| **Aceleración ARM** | Exportación a TFLite (eKuiper nativo) y NCNN (NEON SIMD). |
-| **Telemetría IoT** | Monitoreo de CPU, RAM, temperatura y throttling. |
-| **Despliegue containerizado** | Todos los servicios en Docker, incluyendo inferencia. |
-
-## Documentación Técnica
-
-| Documento | Contenido |
-| :--- | :--- |
-| [Arquitectura y Flujo de Datos](docs/architecture.md) | Pipeline eKuiper-nativo, MQTT topics, despliegue Docker. |
-| [Sistema de Detección](docs/detector.md) | Portable Plugin, modelos, evaluación EPP, health monitor. |
-| [Configuración y Despliegue](docs/deployment.md) | Despliegue automatizado/manual, conversión de modelos, troubleshooting. |
+| Document | Description |
+|:---|:---|
+| [Architecture](docs/architecture.md) | System topology, component responsibilities, and design rationale |
+| [Edge Processing](docs/edge-processing.md) | eKuiper pipeline, AI inference plugin, SQL rules, and Node Agent |
+| [Data Pipeline](docs/data-pipeline.md) | MQTT topics, Telegraf configuration, InfluxDB schema, and Grafana dashboards |
+| [Deployment](docs/deployment.md) | Step-by-step deployment for central server and edge devices |
