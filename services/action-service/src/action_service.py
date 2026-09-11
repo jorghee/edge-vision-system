@@ -29,28 +29,43 @@ ACTION_TOPIC = os.getenv("ACTION_TOPIC", "edge/actions")
 
 def action_log_alert(alert: dict, client: mqtt.Client):
     """Logs the alert with a highlighted format."""
-    log.warning(
-        f"[INFO] ALERT DETECTED\n"
-        f"   Camera   : {alert.get('camera_id', 'N/A')}\n"
-        f"   Event    : {alert.get('event_type', 'N/A')}\n"
-        f"   Severity : {alert.get('severity', 'N/A')}\n"
-        f"   Confidence: {alert.get('confidence', 'N/A')}\n"
-        f"   Time     : {alert.get('timestamp', 'N/A')}"
-    )
+    camera = alert.get('camera_id', 'N/A')
+    time_str = alert.get('timestamp', 'N/A')
+    highest = alert.get('highest_severity', 'N/A')
+    
+    log.warning(f"[INFO] FRAME ALERT | Camera: {camera} | Highest Severity: {highest} | Time: {time_str}")
+    
+    violators = alert.get("violators", [])
+    for v in violators:
+        log.warning(
+            f"   -> VIOLATOR [{v.get('person_id')}] "
+            f"Event: {v.get('event_type')} | "
+            f"Severity: {v.get('severity')} | "
+            f"Confidence: {v.get('confidence')}"
+        )
 
 
 def action_publish_response(alert: dict, client: mqtt.Client):
-    """Publishes a response to the actions topic."""
-    response = {
-        "action": "alert_triggered",
-        "source_event": alert.get("event_type"),
-        "camera_id": alert.get("camera_id"),
-        "handled_at": datetime.utcnow().isoformat() + "Z",
-        "message": f"Alert processed: {alert.get('event_type')} detected",
-        "recommended_action": get_recommendation(alert.get("event_type", ""))
-    }
-    client.publish(ACTION_TOPIC, json.dumps(response), qos=1)
-    log.info(f"[SUCCESS] Response published to '{ACTION_TOPIC}'")
+    """Publishes a response to the actions topic for each violator."""
+    camera = alert.get('camera_id')
+    violators = alert.get("violators", [])
+    
+    for v in violators:
+        event = v.get("event_type")
+        if event == "clear" or event == "ppe_compliant":
+            continue
+            
+        response = {
+            "action": "alert_triggered",
+            "source_event": event,
+            "camera_id": camera,
+            "person_id": v.get("person_id"),
+            "handled_at": datetime.utcnow().isoformat() + "Z",
+            "message": f"Alert processed for person {v.get('person_id')}: {event} detected",
+            "recommended_action": get_recommendation(event)
+        }
+        client.publish(ACTION_TOPIC, json.dumps(response), qos=1)
+        log.info(f"[SUCCESS] Response published to '{ACTION_TOPIC}' for person {v.get('person_id')}")
 
 
 def get_recommendation(event_type: str) -> str:
