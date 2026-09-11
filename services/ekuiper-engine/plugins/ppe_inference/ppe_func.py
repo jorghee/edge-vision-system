@@ -281,14 +281,15 @@ def _check_helmet_hsv(crop):
     total = head.shape[0] * head.shape[1]
 
     color_ranges = [
-        ([15, 80, 80], [35, 255, 255]),   # yellow
+        ([15, 80, 80], [35, 255, 255]),    # yellow
         ([5, 80, 80], [15, 255, 255]),     # orange
         ([0, 0, 180], [180, 30, 255]),     # white
-        ([0, 100, 100], [5, 255, 255]),    # red
+        ([0, 100, 100], [5, 255, 255]),    # red lower
+        ([170, 100, 100], [180, 255, 255]) # red upper
     ]
 
     for lo, hi in color_ranges:
-        mask = cv2.inRange(hsv, np.array(lo), np.array(hi))
+        mask = cv2.inRange(hsv, np.array(lo, dtype=np.uint8), np.array(hi, dtype=np.uint8))
         ratio = cv2.countNonZero(mask) / total
         if ratio > 0.08:
             return True, round(min(0.99, ratio * 8), 2)
@@ -304,7 +305,7 @@ def _check_vest(crop):
     h = crop.shape[0]
     torso = crop[int(h * 0.30):int(h * 0.70), :]
     if torso.size == 0:
-        return False, 0.0
+        return None, 0.0
 
     hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
     total = torso.shape[0] * torso.shape[1]
@@ -314,7 +315,7 @@ def _check_vest(crop):
         ([20, 150, 150], [40, 255, 255]),
     ]
     ratio = sum(
-        cv2.countNonZero(cv2.inRange(hsv, np.array(lo), np.array(hi)))
+        cv2.countNonZero(cv2.inRange(hsv, np.array(lo, dtype=np.uint8), np.array(hi, dtype=np.uint8)))
         / total for lo, hi in ranges
     )
     return ratio > 0.12, round(min(0.99, ratio * 6), 2)
@@ -328,7 +329,7 @@ def _classify_severity(helmet_ok, vest_ok):
     When any assessment is indeterminate, the entire event is classified
     as indeterminate to avoid false positives from fabricated values.
     """
-    if helmet_ok is None:
+    if helmet_ok is None or vest_ok is None:
         return "indeterminate", "indeterminate"
     if not helmet_ok and not vest_ok:
         return "no_helmet_no_vest", "critical"
@@ -378,7 +379,13 @@ def process_frame(frame_bytes):
         vest_ok, vest_conf = _check_vest(crop)
         event_type, severity = _classify_severity(helmet_ok, vest_ok)
 
-        avg_conf = round((person_conf + helmet_conf + vest_conf) / 3, 2)
+        valid_confs = [person_conf]
+        if helmet_ok is not None and helmet_ok:
+            valid_confs.append(helmet_conf)
+        if vest_ok is not None and vest_ok:
+            valid_confs.append(vest_conf)
+
+        avg_conf = round(sum(valid_confs) / len(valid_confs), 2)
 
         detections.append({
             "camera_id": CAMERA_ID,
@@ -398,20 +405,31 @@ def process_frame(frame_bytes):
         return {
             "camera_id": CAMERA_ID,
             "timestamp": datetime.utcnow().isoformat() + "Z",
+            "highest_severity": "none",
             "event_type": "clear",
-            "severity": "none",
             "confidence": 0.99,
             "persons_detected": len(persons),
+            "violators": []
         }
 
     # Sort by severity: critical > high > indeterminate > none
     severity_rank = {"critical": 0, "high": 1, "indeterminate": 2, "none": 3}
     detections.sort(key=lambda d: severity_rank.get(d["severity"], 4))
 
-    result = detections[0]
+    highest = detections[0]
+
+    result = {
+        "camera_id": CAMERA_ID,
+        "timestamp": highest["timestamp"],
+        "highest_severity": highest["severity"],
+        "event_type": highest["event_type"],
+        "confidence": highest["confidence"],
+        "persons_detected": len(persons),
+        "violators": detections
+    }
 
     # Attach a compressed thumbnail for critical/high alerts (for Grafana)
-    if result["severity"] in ("critical", "high"):
+    if highest["severity"] in ("critical", "high"):
         try:
             thumb = cv2.resize(frame, (320, 240))
             _, buf = cv2.imencode(
@@ -462,6 +480,32 @@ class PpeInference(Function):
 
 # Plugin entry point
 if __name__ == '__main__':
+    import sys
+    if "--info" in sys.argv:
+        print("\n" + "="*60)
+        print("  eKuiper PPE Inference Module - Traceability Info")
+        print("="*60)
+        try:
+            models = _load_models()
+            base_model = models["base"]
+            ppe_model = models["ppe"]
+            
+            print(f"[Model] Base YOLO (Persons): {base_model.model_name if hasattr(base_model, 'model_name') else 'Loaded from ' + MODELS_DIR}")
+            if ppe_model:
+                print(f"[Model] PPE (Helmet): {ppe_model.model_name if hasattr(ppe_model, 'model_name') else 'Loaded from ' + MODELS_DIR}")
+            else:
+                print("[Model] PPE (Helmet): NONE -> Using auxiliary HSV Logic")
+            
+            print(f"[Config] Models Directory: {MODELS_DIR}")
+            print(f"[Config] Confidence Threshold: {CONFIDENCE_THR}")
+            print(f"[Config] Camera FPS Limit: {CAMERA_FPS}")
+            print(f"[Config] Camera ID: {CAMERA_ID}")
+            print("="*60 + "\n")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error gathering info: {e}")
+            sys.exit(1)
+
     from ekuiper.runtime.plugin import PluginConfig, start
     c = PluginConfig(
         name="ppe_inference",

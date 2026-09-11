@@ -87,8 +87,13 @@ REGISTER_RESULT=$(curl -s -X POST "${API_URL}/plugins/portables" \
   -H "Content-Type: application/json" \
   -d '{"name": "ppe_inference", "file": "file:///tmp/ppe_inference.zip"}')
 echo "  ${REGISTER_RESULT}"
+echo ""
 
-echo "[3/6] Creating camera stream (portable source: cameraSource)..."
+echo "[2b/7] Gathering Deployment Traceability Info (AI Models & Config)..."
+docker exec "${EKUIPER_CONTAINER}" python3 /kuiper/plugins/portables/ppe_inference/ppe_func.py --info || true
+echo ""
+
+echo "[3/7] Creating camera stream (portable source: cameraSource)..."
 curl -s -X POST "${API_URL}/streams" \
   -H "Content-Type: application/json" \
   -d '{
@@ -120,7 +125,7 @@ create_rule "ppe_inference_pipeline" "{
 echo "[5/7] Creating PPE detection rule (critical alerts)..."
 create_rule "ppe_alert_critical" "{
     \"id\": \"ppe_alert_critical\",
-    \"sql\": \"SELECT * FROM ppe_results_stream WHERE detection->severity = 'critical'\",
+    \"sql\": \"SELECT * FROM ppe_results_stream WHERE detection->highest_severity = 'critical'\",
     \"actions\": [
       {\"mqtt\": ${MQTT_SINK_ALERTS}},
       {\"log\": {}}
@@ -130,7 +135,7 @@ create_rule "ppe_alert_critical" "{
 echo "[6/7] Creating PPE detection rule (high alerts)..."
 create_rule "ppe_alert_high" "{
     \"id\": \"ppe_alert_high\",
-    \"sql\": \"SELECT * FROM ppe_results_stream WHERE detection->severity = 'high'\",
+    \"sql\": \"SELECT * FROM ppe_results_stream WHERE detection->highest_severity = 'high'\",
     \"actions\": [
       {\"mqtt\": ${MQTT_SINK_ALERTS}},
       {\"log\": {}}
