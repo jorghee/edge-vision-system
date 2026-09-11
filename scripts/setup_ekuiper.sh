@@ -26,7 +26,7 @@ MQTT_PASSWORD="${MQTT_PASSWORD:-$(docker exec "${EKUIPER_CONTAINER}" printenv MQ
 
 echo "MQTT target: ${MQTT_SERVER_URL} (user: ${MQTT_USERNAME:-anonymous})"
 
-# ── Helper: create an eKuiper rule with retry logic ──────────────────────────
+# Helper: create an eKuiper rule with retry logic
 # On ARM64, the portable plugin (Python + OpenCV + YOLO) can take over 60s to
 # fully initialize. eKuiper validates the SQL by calling the function at rule
 # creation time, which may time out if the plugin is still loading.
@@ -92,7 +92,7 @@ echo "[3/6] Creating camera stream (portable source: cameraSource)..."
 curl -s -X POST "${API_URL}/streams" \
   -H "Content-Type: application/json" \
   -d '{
-    "sql": "CREATE STREAM camera_frames () WITH (TYPE=\"cameraSource\", CONF_KEY=\"default\", FORMAT=\"json\")"
+    "sql": "CREATE STREAM camera_frames () WITH (TYPE=\"cameraSource\", CONF_KEY=\"default\", FORMAT=\"json\", SHARED=\"true\")"
   }'
 echo ""
 
