@@ -92,6 +92,7 @@ class CameraSource(Source):
 
     def open(self, ctx: Context):
         cv2 = _get_cv2()
+        np = _get_np()
 
         # Retry connection to RTSP (MediaMTX may still be starting)
         for attempt in range(30):
@@ -108,15 +109,36 @@ class CameraSource(Source):
 
         log.info("Connected to RTSP stream: %s", self.rtsp_url)
 
-        # Pre-load AI models while the source initializes, before any
-        # frames are emitted.  This avoids a cold-start timeout on the
-        # first ppeInference() call (model loading takes ~5-7s on ARM64,
-        # which exceeds eKuiper's IPC receive timeout).
+        # Model warm-up
+        # Loading a YOLO model into RAM is not enough.  The first real
+        # inference triggers NCNN/TFLite graph compilation and hardware
+        # buffer allocation, which takes ~10 s on ARM64 — well beyond
+        # eKuiper's 5 s IPC receive timeout.  Running a dummy inference
+        # on a synthetic black frame forces that one-time cost here,
+        # during source init, where there is no timeout pressure.
         try:
-            _load_models()
-            log.info("AI models pre-loaded during source init")
+            models = _load_models()
+            log.info("AI models loaded, running warm-up inference...")
+            dummy = np.zeros((320, 240, 3), dtype=np.uint8)
+            models["base"](dummy, conf=0.9, verbose=False)
+            if models["ppe"] is not None:
+                models["ppe"](dummy, conf=0.9, verbose=False)
+            log.info("Warm-up inference complete — models are hot")
         except Exception as e:
-            log.warning("Model pre-load failed (will retry on first call): %s", e)
+            log.warning(
+                "Model warm-up failed (will retry on first call): %s", e)
+
+        # Active-drain capture loop
+        # An RTSP camera pushes ~30 fps continuously.  The old pattern
+        # of read-one-frame then sleep(interval) let ~60 frames pile up
+        # in FFmpeg's internal H264 decode buffer during each sleep,
+        # eventually corrupting packets (bytestream -5/-7/-9).
+        #
+        # Instead, we read every frame at full speed (keeping the
+        # buffer empty) but only encode + emit to eKuiper when enough
+        # wall-clock time has elapsed.  Intermediate frames are simply
+        # discarded.
+        last_emit = 0.0
 
         while True:
             try:
@@ -126,6 +148,12 @@ class CameraSource(Source):
                     self.cap.release()
                     time.sleep(2)
                     self.cap = cv2.VideoCapture(self.rtsp_url)
+                    last_emit = 0.0
+                    continue
+
+                now = time.time()
+                if now - last_emit < self.interval:
+                    # Drain the buffer — discard this frame silently
                     continue
 
                 # Encode frame as JPEG bytes, then base64 for transport
@@ -137,10 +165,10 @@ class CameraSource(Source):
                           "timestamp": datetime.utcnow().isoformat() + "Z"},
                          {})
 
-                time.sleep(self.interval)
+                last_emit = now
             except Exception as e:
                 log.error("Error in CameraSource loop: %s", e)
-                time.sleep(self.interval)
+                time.sleep(2)
 
     def close(self, ctx: Context):
         if self.cap and self.cap.isOpened():
