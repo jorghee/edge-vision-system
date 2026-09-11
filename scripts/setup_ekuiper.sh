@@ -61,10 +61,10 @@ create_rule() {
 }
 
 echo "[1/6] Cleaning previous configuration..."
-for rule in ppe_alert_critical ppe_alert_high ppe_monitor alert_critical alert_high monitor_all; do
+for rule in ppe_inference_pipeline ppe_alert_critical ppe_alert_high ppe_monitor alert_critical alert_high monitor_all; do
     curl -s -X DELETE "${API_URL}/rules/${rule}" > /dev/null 2>&1 || true
 done
-for stream in camera_frames video_frames camera_events; do
+for stream in camera_frames ppe_results_stream video_frames camera_events; do
     curl -s -X DELETE "${API_URL}/streams/${stream}" > /dev/null 2>&1 || true
 done
 curl -s -X DELETE "${API_URL}/plugins/portables/ppe_inference" > /dev/null 2>&1 || true
@@ -96,34 +96,51 @@ curl -s -X POST "${API_URL}/streams" \
   }'
 echo ""
 
+echo "[3b/7] Creating internal memory stream (Rule Pipeline decoupling)..."
+curl -s -X POST "${API_URL}/streams" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sql": "CREATE STREAM ppe_results_stream () WITH (TYPE=\"memory\", DATASOURCE=\"ppe_results\", FORMAT=\"json\")"
+  }'
+echo ""
+
 # Build MQTT sink config with authentication
 MQTT_SINK_ALERTS="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/alerts\",\"qos\":1,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"sendSingle\":true,\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
 MQTT_SINK_MONITOR="{\"server\":\"${MQTT_SERVER_URL}\",\"topic\":\"edge/monitor\",\"qos\":0,\"username\":\"${MQTT_USERNAME}\",\"password\":\"${MQTT_PASSWORD}\",\"sendSingle\":true,\"maxDiskCache\":10000,\"bufferPageSize\":1,\"resendInterval\":2000,\"cleanCacheAtStop\":false}"
 
-echo "[4/6] Creating PPE detection rule (critical alerts)..."
+echo "[4/7] Creating AI Inference Pipeline rule (writes to memory)..."
+create_rule "ppe_inference_pipeline" "{
+    \"id\": \"ppe_inference_pipeline\",
+    \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames\",
+    \"actions\": [
+      {\"memory\": {\"topic\": \"ppe_results\", \"sendSingle\": true}}
+    ]
+  }"
+
+echo "[5/7] Creating PPE detection rule (critical alerts)..."
 create_rule "ppe_alert_critical" "{
     \"id\": \"ppe_alert_critical\",
-    \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = 'critical'\",
+    \"sql\": \"SELECT * FROM ppe_results_stream WHERE detection->severity = 'critical'\",
     \"actions\": [
       {\"mqtt\": ${MQTT_SINK_ALERTS}},
       {\"log\": {}}
     ]
   }"
 
-echo "[5/6] Creating PPE detection rule (high alerts)..."
+echo "[6/7] Creating PPE detection rule (high alerts)..."
 create_rule "ppe_alert_high" "{
     \"id\": \"ppe_alert_high\",
-    \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->severity = 'high'\",
+    \"sql\": \"SELECT * FROM ppe_results_stream WHERE detection->severity = 'high'\",
     \"actions\": [
       {\"mqtt\": ${MQTT_SINK_ALERTS}},
       {\"log\": {}}
     ]
   }"
 
-echo "[6/6] Creating monitoring rule (all non-clear events)..."
+echo "[7/7] Creating monitoring rule (all non-clear events)..."
 create_rule "ppe_monitor" "{
     \"id\": \"ppe_monitor\",
-    \"sql\": \"SELECT ppeInference(frame) as detection FROM camera_frames WHERE ppeInference(frame)->event_type != 'clear'\",
+    \"sql\": \"SELECT * FROM ppe_results_stream WHERE detection->event_type != 'clear'\",
     \"actions\": [
       {\"mqtt\": ${MQTT_SINK_MONITOR}}
     ]

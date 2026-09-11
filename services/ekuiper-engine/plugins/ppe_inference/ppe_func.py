@@ -430,23 +430,10 @@ class PpeInference(Function):
 
     Called from SQL rules as: ppeInference(frame)
     Receives base64-encoded frame string, returns list of detection results.
-
-    Includes a single-entry inference cache.  eKuiper evaluates the
-    function once in the WHERE clause and again in the SELECT clause for
-    each rule (up to 6 calls per frame across 3 rules).  By caching the
-    result keyed on (hash, length) of the raw frame data, five redundant
-    YOLO executions are eliminated per frame cycle.
     """
 
-    # Cache TTL in seconds — prevents returning a stale result if a new
-    # frame happens to collide on (hash, length), which is near-impossible
-    # but worth guarding against.
-    _CACHE_TTL = 5.0
-
     def __init__(self):
-        self._cache_key = None
-        self._cache_result = None
-        self._cache_ts = 0.0
+        pass
 
     def validate(self, args: list) -> str:
         if len(args) != 1:
@@ -457,28 +444,13 @@ class PpeInference(Function):
         try:
             frame_data = args[0]
 
-            # Build a lightweight cache key: (hash, length) avoids
-            # comparing the full ~100 KB base64 string on every call.
-            cache_key = (hash(frame_data), len(frame_data))
-            now = time.time()
-
-            if (self._cache_key == cache_key
-                    and self._cache_result is not None
-                    and now - self._cache_ts < self._CACHE_TTL):
-                return self._cache_result
-
             if isinstance(frame_data, str):
                 frame_bytes = base64.b64decode(frame_data)
             else:
                 frame_bytes = frame_data
 
-            result = process_frame(frame_bytes)
+            return process_frame(frame_bytes)
 
-            self._cache_key = cache_key
-            self._cache_result = result
-            self._cache_ts = now
-
-            return result
         except Exception as e:
             log.error("Inference error: %s", e, exc_info=True)
             return {"event_type": "error", "severity": "none",
