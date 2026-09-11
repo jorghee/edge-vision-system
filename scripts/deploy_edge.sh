@@ -100,11 +100,11 @@ RPI_PROJECT_DIR="edge-vision-system"
 
 ssh "${RPI_USER}@${RPI_IP}" "
     if [ ! -d '${RPI_PROJECT_DIR}' ]; then
-        echo '  Cloning repository (branch: feature/ekuiper)...'
-        git clone -b feature/ekuiper '${HTTPS_URL}' '${RPI_PROJECT_DIR}'
+        echo '  Cloning repository (branch: main)...'
+        git clone -b main '${HTTPS_URL}' '${RPI_PROJECT_DIR}'
     else
-        echo '  Updating repository (branch: feature/ekuiper)...'
-        cd '${RPI_PROJECT_DIR}' && git fetch && git checkout feature/ekuiper && git pull origin feature/ekuiper
+        echo '  Updating repository (branch: main)...'
+        cd '${RPI_PROJECT_DIR}' && git fetch && git checkout main && git pull origin main
     fi
 "
 
