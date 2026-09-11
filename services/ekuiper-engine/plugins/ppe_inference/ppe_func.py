@@ -388,8 +388,6 @@ def process_frame(frame_bytes):
         avg_conf = round(sum(valid_confs) / len(valid_confs), 2)
 
         detections.append({
-            "camera_id": CAMERA_ID,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
             "event_type": event_type,
             "severity": severity,
             "confidence": avg_conf,
@@ -397,8 +395,7 @@ def process_frame(frame_bytes):
             "helmet_detected": bool(helmet_ok) if helmet_ok is not None else False,
             "helmet_confidence": round(helmet_conf, 2),
             "vest_detected": vest_ok,
-            "vest_confidence": round(vest_conf, 2),
-            "persons_detected": len(persons),
+            "vest_confidence": round(vest_conf, 2)
         })
 
     if not detections:
