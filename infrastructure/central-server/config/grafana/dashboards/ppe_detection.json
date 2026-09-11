@@ -316,7 +316,7 @@
       "datasource": { "type": "influxdb", "uid": "${DS_INFLUXDB}" },
       "targets": [
         {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_measurement\", \"host\", \"mqtt_topic\", \"timestamp\"])\n  |> map(fn: (r) => ({ r with snapshot: if exists r.snapshot then \"data:image/jpeg;base64,\" + r.snapshot else \"\" }))\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 100)\n  |> yield(name: \"recent\")",
+          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ppe_events\")\n  |> filter(fn: (r) => if \"${camera_id}\" != \"All\" then r.camera_id == \"${camera_id}\" else true)\n  |> pivot(rowKey:[\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"_measurement\", \"host\", \"mqtt_topic\", \"timestamp\"])\n  |> map(fn: (r) => ({ r with snapshot: if exists r.snapshot then \"data:image/jpeg;base64,\" + r.snapshot else \"\" }))\n  |> group()\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 100)\n  |> yield(name: \"recent\")",
           "refId": "A"
         }
       ],
@@ -423,6 +423,13 @@
             ]
           },
           {
+            "matcher": { "id": "byName", "options": "person_id" },
+            "properties": [
+              { "id": "displayName", "value": "ID Persona" },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          {
             "matcher": { "id": "byName", "options": "snapshot" },
             "properties": [
               { "id": "displayName", "value": "Captura" },
@@ -447,13 +454,14 @@
               "severity": 1,
               "event_type": 2,
               "camera_id": 3,
-              "confidence": 4,
-              "helmet_detected": 5,
-              "vest_detected": 6,
-              "persons_detected": 7,
-              "helmet_confidence": 8,
-              "vest_confidence": 9,
-              "snapshot": 10
+              "person_id": 4,
+              "confidence": 5,
+              "helmet_detected": 6,
+              "vest_detected": 7,
+              "persons_detected": 8,
+              "helmet_confidence": 9,
+              "vest_confidence": 10,
+              "snapshot": 11
             }
           }
         }
