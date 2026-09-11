@@ -49,7 +49,7 @@ CONFIDENCE_THR = float(os.getenv("CONFIDENCE_THR", "0.45"))
 CAMERA_ID = os.getenv("CAMERA_ID", "cam-rpi-01")
 # RTSP URL served by MediaMTX sidecar container
 RTSP_URL = os.getenv("RTSP_URL", "rtsp://mediamtx:8554/cam")
-CAMERA_FPS = int(os.getenv("CAMERA_FPS", "2"))
+CAMERA_FPS = float(os.getenv("CAMERA_FPS", "0.5"))
 
 # Lazy-loaded references
 _models = None
@@ -85,7 +85,7 @@ class CameraSource(Source):
 
     def configure(self, datasource: str, conf: dict):
         self.rtsp_url = conf.get("url", RTSP_URL)
-        self.interval = 1.0 / conf.get("fps", CAMERA_FPS)
+        self.interval = 1.0 / float(conf.get("fps", CAMERA_FPS))
         self.cap = None
         log.info("CameraSource configured: url=%s, fps=%s",
                  self.rtsp_url, conf.get("fps", CAMERA_FPS))
@@ -107,6 +107,16 @@ class CameraSource(Source):
             return
 
         log.info("Connected to RTSP stream: %s", self.rtsp_url)
+
+        # Pre-load AI models while the source initializes, before any
+        # frames are emitted.  This avoids a cold-start timeout on the
+        # first ppeInference() call (model loading takes ~5-7s on ARM64,
+        # which exceeds eKuiper's IPC receive timeout).
+        try:
+            _load_models()
+            log.info("AI models pre-loaded during source init")
+        except Exception as e:
+            log.warning("Model pre-load failed (will retry on first call): %s", e)
 
         while True:
             try:

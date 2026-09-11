@@ -62,7 +62,7 @@ services:
       MODELS_DIR: "/kuiper/models"
       CAMERA_ID: "${CAMERA_ID:-cam-rpi-01}"
       CONFIDENCE_THR: "${CONFIDENCE_THR:-0.45}"
-      CAMERA_FPS: "${CAMERA_FPS:-2}"
+      CAMERA_FPS: "${CAMERA_FPS:-0.5}"
       RTSP_URL: "rtsp://mediamtx:8554/cam"
     volumes:
       - ekuiper-data:/kuiper/data
