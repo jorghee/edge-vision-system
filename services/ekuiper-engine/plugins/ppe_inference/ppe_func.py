@@ -59,6 +59,9 @@ _np = None
 HELMET_CLASS = 0
 HEAD_CLASS = 1
 
+# Global lock to drop frames if inference is busy
+_is_processing = False
+
 
 def _get_cv2():
     """Lazy import of OpenCV."""
@@ -154,6 +157,12 @@ class CameraSource(Source):
                 now = time.time()
                 if now - last_emit < self.interval:
                     # Drain the buffer — discard this frame silently
+                    continue
+
+                global _is_processing
+                if _is_processing:
+                    # Inference is still running on a previous frame.
+                    # Drop this frame to prevent eKuiper queue bloat.
                     continue
 
                 # Encode frame as JPEG bytes, then base64 for transport
@@ -456,6 +465,8 @@ class PpeInference(Function):
         return ""
 
     def exec(self, args: list, ctx: Context) -> dict:
+        global _is_processing
+        _is_processing = True
         try:
             frame_data = args[0]
 
@@ -470,6 +481,8 @@ class PpeInference(Function):
             log.error("Inference error: %s", e, exc_info=True)
             return {"event_type": "error", "severity": "none",
                     "error": str(e)}
+        finally:
+            _is_processing = False
 
     def is_aggregate(self) -> bool:
         return False
