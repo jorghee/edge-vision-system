@@ -417,7 +417,7 @@ def process_frame(frame_bytes):
 
     result = {
         "camera_id": CAMERA_ID,
-        "timestamp": highest["timestamp"],
+        "timestamp": datetime.utcnow().isoformat() + "Z",
         "highest_severity": highest["severity"],
         "event_type": highest["event_type"],
         "confidence": highest["confidence"],
