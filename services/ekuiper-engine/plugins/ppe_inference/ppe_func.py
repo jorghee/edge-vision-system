@@ -20,6 +20,7 @@ import os
 import time
 import base64
 import logging
+import threading
 from datetime import datetime
 
 logging.basicConfig(
@@ -141,45 +142,64 @@ class CameraSource(Source):
         # buffer empty) but only encode + emit to eKuiper when enough
         # wall-clock time has elapsed.  Intermediate frames are simply
         # discarded.
-        last_emit = 0.0
+        self.running = True
+        self.latest_frame = None
+        self.frame_lock = threading.Lock()
 
-        while True:
-            try:
-                ret, frame = self.cap.read()
-                if not ret:
-                    log.warning("Failed to read frame, reconnecting...")
-                    self.cap.release()
+        def capture_loop():
+            """Runs continuously to keep the RTSP socket buffer empty."""
+            while self.running:
+                try:
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        log.warning("Failed to read frame, reconnecting...")
+                        self.cap.release()
+                        time.sleep(2)
+                        self.cap = cv2.VideoCapture(self.rtsp_url)
+                        continue
+                    with self.frame_lock:
+                        self.latest_frame = frame
+                except Exception as e:
+                    log.error("Error in capture loop: %s", e)
                     time.sleep(2)
-                    self.cap = cv2.VideoCapture(self.rtsp_url)
-                    last_emit = 0.0
-                    continue
 
+        t = threading.Thread(target=capture_loop, daemon=True)
+        t.start()
+
+        last_emit = 0.0
+        while self.running:
+            try:
                 now = time.time()
                 if now - last_emit < self.interval:
-                    # Drain the buffer — discard this frame silently
+                    time.sleep(0.01)
                     continue
 
-                global _is_processing
-                if _is_processing:
-                    # Inference is still running on a previous frame.
-                    # Drop this frame to prevent eKuiper queue bloat.
-                    continue
+                frame = None
+                with self.frame_lock:
+                    if self.latest_frame is not None:
+                        frame = self.latest_frame.copy()
+                        self.latest_frame = None
 
-                # Encode frame as JPEG bytes, then base64 for transport
-                _, buf = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                b64_frame = base64.b64encode(buf.tobytes()).decode("ascii")
+                if frame is not None:
+                    _, buf = cv2.imencode(
+                        ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    b64_frame = base64.b64encode(buf.tobytes()).decode("ascii")
 
-                ctx.emit({"frame": b64_frame, "camera_id": CAMERA_ID,
-                          "timestamp": datetime.utcnow().isoformat() + "Z"},
-                         {})
+                    # This ctx.emit blocks if inference is busy. 
+                    # That is perfectly fine now, because capture_loop is unaffected.
+                    ctx.emit({"frame": b64_frame, "camera_id": CAMERA_ID,
+                              "timestamp": datetime.utcnow().isoformat() + "Z"},
+                             {})
+                    last_emit = time.time()
+                else:
+                    time.sleep(0.01)
 
-                last_emit = now
             except Exception as e:
-                log.error("Error in CameraSource loop: %s", e)
+                log.error("Error in CameraSource emit loop: %s", e)
                 time.sleep(2)
 
     def close(self, ctx: Context):
+        self.running = False
         if self.cap and self.cap.isOpened():
             self.cap.release()
             log.info("RTSP stream released")
