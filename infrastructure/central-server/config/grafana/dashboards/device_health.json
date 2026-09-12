@@ -525,10 +525,6 @@
         {
           "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_metrics\" and r._field == \"cpu_percent\")\n  |> filter(fn: (r) => r.camera_id == \"${camera_id}\")\n  |> drop(columns: [\"host\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"cpu\")",
           "refId": "A"
-        },
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"DUMMY_FORCE_MULTI_FRAME\")\n  |> yield(name: \"dummy\")",
-          "refId": "DUMMY"
         }
       ],
       "fieldConfig": {
@@ -597,7 +593,8 @@
           "mode": "single"
         },
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -723,10 +720,6 @@
         {
           "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_metrics\" and r._field == \"temperature_c\")\n  |> filter(fn: (r) => r.camera_id == \"${camera_id}\")\n  |> drop(columns: [\"host\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"temp\")",
           "refId": "A"
-        },
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"DUMMY_FORCE_MULTI_FRAME\")\n  |> yield(name: \"dummy\")",
-          "refId": "DUMMY"
         }
       ],
       "fieldConfig": {
@@ -799,7 +792,8 @@
           "mode": "single"
         },
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -1126,10 +1120,6 @@
         {
           "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_metrics\" and r._field == \"inference_latency_ms\")\n  |> filter(fn: (r) => r.camera_id == \"${camera_id}\")\n  |> drop(columns: [\"host\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"latency\")",
           "refId": "A"
-        },
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"DUMMY_FORCE_MULTI_FRAME\")\n  |> yield(name: \"dummy\")",
-          "refId": "DUMMY"
         }
       ],
       "fieldConfig": {
@@ -1190,7 +1180,8 @@
           "mode": "single"
         },
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -1213,10 +1204,6 @@
         {
           "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_metrics\" and r._field == \"frames_processed\")\n  |> filter(fn: (r) => r.camera_id == \"${camera_id}\")\n  |> drop(columns: [\"host\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> derivative(unit: 1m, nonNegative: true)\n  |> yield(name: \"fps\")",
           "refId": "A"
-        },
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"DUMMY_FORCE_MULTI_FRAME\")\n  |> yield(name: \"dummy\")",
-          "refId": "DUMMY"
         }
       ],
       "fieldConfig": {
@@ -1257,7 +1244,8 @@
           "mode": "single"
         },
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -1280,10 +1268,6 @@
         {
           "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_metrics\" and r._field == \"inference_errors\")\n  |> filter(fn: (r) => r.camera_id == \"${camera_id}\")\n  |> drop(columns: [\"host\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> yield(name: \"errors\")",
           "refId": "A"
-        },
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"DUMMY_FORCE_MULTI_FRAME\")\n  |> yield(name: \"dummy\")",
-          "refId": "DUMMY"
         }
       ],
       "fieldConfig": {
@@ -1320,7 +1304,8 @@
           "mode": "single"
         },
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -1343,10 +1328,6 @@
         {
           "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"device_metrics\" and r._field == \"inference_errors\")\n  |> filter(fn: (r) => r.camera_id == \"${camera_id}\")\n  |> drop(columns: [\"host\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> derivative(unit: 1m, nonNegative: true)\n  |> yield(name: \"error_rate\")",
           "refId": "A"
-        },
-        {
-          "query": "from(bucket: \"edge-data\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"DUMMY_FORCE_MULTI_FRAME\")\n  |> yield(name: \"dummy\")",
-          "refId": "DUMMY"
         }
       ],
       "fieldConfig": {
@@ -1384,7 +1365,8 @@
           "mode": "single"
         },
         "legend": {
-          "displayMode": "hidden"
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     }
