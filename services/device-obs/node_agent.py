@@ -138,7 +138,7 @@ def get_ekuiper_metrics() -> dict:
 
     try:
         import urllib.request
-        rules = ["ppe_alert_critical", "ppe_alert_high", "ppe_monitor"]
+        rules = ["ppe_inference_pipeline"]
 
         total_in = 0
         total_errors = 0
@@ -157,9 +157,9 @@ def get_ekuiper_metrics() -> dict:
             for key, value in data.items():
                 if key.endswith("records_in_total") and "source" in key:
                     total_in += value
-                elif key.endswith("process_latency_us") and "source" in key:
+                elif key.endswith("process_latency_us"):
                     max_latency = max(max_latency, value)
-                elif key.endswith("exceptions_total") and "source" in key:
+                elif key.endswith("exceptions_total"):
                     total_errors += value
 
         metrics["frames_processed"] = total_in
