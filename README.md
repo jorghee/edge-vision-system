@@ -1,8 +1,22 @@
-# Edge Vision System
+# <samp>Edge Vision System<samp>
 
 An **Edge/IoT data engineering platform** that captures, processes, and filters sensor data locally on resource-constrained devices before transmitting only meaningful events to a central server for storage and analysis.
 
 The current deployment uses **PPE (Personal Protective Equipment) detection** as a demonstration use case: a Raspberry Pi captures video, runs YOLOv8 inference, evaluates helmet and vest compliance, and publishes structured alerts - all without sending a single video frame over the network.
+
+
+## Table of Contents
+
+- [The Problem](#the-problem)
+- [Architecture Overview](#architecture-overview)
+- [Data Flow](#data-flow)
+- [Components](#components)
+- [MQTT Topics](#mqtt-topics)
+- [Grafana Dashboards](#grafana-dashboards)
+- [Dashboard Previews](#eyes-sampdashboard-previews)
+- [Quick Start](#quick-start)
+- [Applicability](#applicability)
+- [Documentation](#documentation)
 
 ## The Problem
 
@@ -51,6 +65,10 @@ graph TD
 
 The following diagram traces how a single camera frame is transformed into an actionable alert stored in InfluxDB:
 
+<details>
+<summary><b>Click to expand the Data Flow sequence diagram</b></summary>
+<br>
+
 ```mermaid
 sequenceDiagram
     participant C as Camera
@@ -83,6 +101,8 @@ sequenceDiagram
 
 A 5 MB video frame becomes a 2 KB JSON event. When no violations are detected, zero bytes are transmitted. This is the core value of edge processing.
 
+</details>
+
 ## Components
 
 | Component | Location | Runs On | Responsibility |
@@ -114,6 +134,23 @@ Two pre-provisioned dashboards are automatically loaded when Grafana starts:
 
 - **PPE Detection**: Alert counts by severity, timeline analysis, violation type distribution (pie chart), and a detailed events table with rendered snapshot images.
 - **Device Health**: Real-time connectivity status, CPU/RAM/temperature gauges, historical resource usage, network traffic (TX/RX), inference latency trends, frame processing rate, and error tracking.
+
+## Dashboard Previews
+
+The **Device Health** dashboard tracks real-time resource utilization, connectivity, and AI pipeline performance trends. The **PPE Detection** dashboard monitors inference results, providing structured compliance alerts and live visual snapshots of the edge stream.
+
+| <b>Device Health (Observability Dashboard)</b>                                                        |
+|-------------------------------------------------------------------------------------------------------|
+| <a href="#--------"><img src=".github/assets/20260911_232437.png" width="800px" alt="Device Health Top"></a>   |
+| <a href="#--------"><img src=".github/assets/20260911_232448.png" width="800px" alt="Device Health Bottom"></a>|
+
+<br>
+
+| <b>PPE Detection (Prediction Dashboard)</b>                                                           |
+|-------------------------------------------------------------------------------------------------------|
+| <a href="#--------"><img src=".github/assets/20260911_214955.png" width="800px" alt="PPE Detection Top"></a>   |
+| <a href="#--------"><img src=".github/assets/20260912_002544.png" width="800px" alt="PPE Detection Bottom"></a>|
+
 
 ## Quick Start
 
